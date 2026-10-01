@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: Quest Pace Log
+## Notes: Timestamps the exact moment a quest is accepted and turned in, and prints a pacing report.
+## Author: Felips
+## Version: 1.2
+## SavedVariablesPerCharacter: QuestPaceLogDB
+
+QuestPaceLog.lua
