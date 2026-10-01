@@ -8,9 +8,9 @@ Felips is a lawyer building a career in game design criticism, not a programmer.
 
 ## Standing rules
 
-- **Own character only.** Use only events and functions about the player's own character and quest log. Never read, log or inspect other players, never automate any action, never send data anywhere. The addon is for Felips' own use and is never published or distributed.
+- **Own character only.** Use only events and functions about the player's own character and quest log. Never read, log or inspect other players, never automate any action, never send data anywhere. The code is open source, public at https://github.com/fepjensen/QuestPaceLog. The play data never leaves Felips' computer. Never commit anything from the WTF folder or any saved data.
 - **The saved data format is a contract.** A Python pipeline outside this repo reads `QuestPaceLogDB` by field name. Changes are additive only. Never rename or remove a field or change its meaning or type, and keep old saved files loading. Every new field goes into `docs/SCHEMA.md` and `CHANGELOG.md`.
-- **Tests for every change.** `lua tests/run_tests.lua` from the repo root, with Lua 5.1. Add a test for each new behavior. The tests stub the WoW API, so they prove the logic, not the client. Say so when reporting.
+- **Tests for every change.** `luajit tests/run_tests.lua` from the repo root (LuaJIT runs Lua 5.1 code, installed with winget). Add a test for each new behavior. The tests stub the WoW API, so they prove the logic, not the client. Say so when reporting.
 - **Unknown API, check in game.** The Forever client reports interface version 16001 and its exact API isn't documented. Write new code defensively (check a function exists, use pcall where a call might fail) and tell Felips which chat line or `/dump` command confirms it works.
 - **Version and changelog.** Bump `## Version` in `QuestPaceLog/QuestPaceLog.toc` for each release and add a CHANGELOG entry.
 - **Don't touch the WTF folder.** Never edit or delete anything under `F:\World of Warcraft\_classic_beta_\WTF`. The game writes the saved files, and Felips keeps dated backups there.
@@ -26,4 +26,4 @@ Felips is a lawyer building a career in game design criticism, not a programmer.
 
 ## Deploying
 
-The game loads the addon from `F:\World of Warcraft\_classic_beta_\Interface\AddOns\QuestPaceLog`. After a change, copy the `QuestPaceLog` folder there (or use the link Felips approved, if any), then Felips types `/reload` in game.
+The game loads the addon from `F:\World of Warcraft\_classic_beta_\Interface\AddOns\QuestPaceLog`. That folder is a directory junction to this repo's `QuestPaceLog/` folder, made by `deploy.ps1`, so edits show up after `/reload` with no copy step. Never delete the junction's contents. To remove it, delete only the link, as the comment in `deploy.ps1` shows.
