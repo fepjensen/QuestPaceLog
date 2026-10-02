@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4, 2026-10-01
+
+- /qpl show opens a dashboard window with the report, and buttons for This session and All sessions. It can be moved, scrolled, and closed with Escape, and its text can be selected and copied. /qpl show all opens straight on All sessions.
+- /qpl report all prints the report across every session. The wait between one session's last turn-in and the next session's first accept doesn't count as a gap.
+- No change to the saved data format.
+- The window uses the client's standard frame templates when they exist and falls back to a plain window when they don't. Not yet verified in the real Forever client.
+
 ## 1.3, 2026-10-01
 
 - Groups. Each session has a new `groups` list. A group record opens when you join, notes every change in size, and closes when you leave, with how long it lasted. Only member counts are kept, never names or anything else about other players.

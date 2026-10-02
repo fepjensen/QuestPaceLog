@@ -35,9 +35,22 @@ local function newWorld(opts)
     _G.SlashCmdList = {}
     _G.print = function(msg) table.insert(W.printed, (tostring(msg):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))) end
     local handler
-    _G.CreateFrame = function()
-        return { RegisterEvent = function() end, SetScript = function(_, _, f) handler = f end }
+    -- A fake frame that accepts any method. It keeps the event handler, and
+    -- the window's text, so tests can check what the window shows.
+    local function fakeFrame()
+        local f = {}
+        f.SetScript = function(self, what, fn) if what == "OnEvent" then handler = fn end; self[what] = fn end
+        f.SetText = function(self, t) self.shownText = t; W.lastText = t end
+        f.CreateFontString = function() return fakeFrame() end
+        f.CreateTexture = function() return fakeFrame() end
+        return setmetatable(f, { __index = function() return function() end end })
     end
+    W.missingTemplates = {}
+    _G.CreateFrame = function(_, _, _, template)
+        if template and W.missingTemplates[template] then error("Couldn't find inherited node " .. template) end
+        return fakeFrame()
+    end
+    _G.UIParent, _G.UISpecialFrames = nil, {}
     _G.C_QuestLog, _G.GetNumQuestLogEntries, _G.GetQuestLogTitle = nil, nil, nil
     if opts.api == "classic" then
         _G.GetNumQuestLogEntries = function() return #W.order end
@@ -357,6 +370,56 @@ test("older Classic party and raid counts work", function()
     raid = 12
     W.fire("RAID_ROSTER_UPDATE")
     eq(QuestPaceLogDB.sessions[1].groups[1].maxSize, 12, "raid count includes you")
+end)
+
+-- Two sessions, each with one quest, and a long overnight wait in between.
+local function twoSessions(W)
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(900, "First Day", 8)
+    W.fire("QUEST_ACCEPTED", 900)
+    W.clock = W.clock + 120
+    W.removeQuest(900)
+    W.fire("QUEST_TURNED_IN", 900, 100, 0)
+    W.clock = W.clock + 12 * 3600
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(901, "Second Day", 8)
+    W.fire("QUEST_ACCEPTED", 901)
+    W.clock = W.clock + 240
+    W.removeQuest(901)
+    W.fire("QUEST_TURNED_IN", 901, 100, 0)
+end
+
+test("/qpl report all covers every session, without overnight gaps", function()
+    local W = newWorld()
+    twoSessions(W)
+    W.cmd("report all")
+    assert(W.saw("all 2 sessions since"), "all-sessions header")
+    assert(W.saw("Quests logged, 2."), "quests from both sessions")
+    assert(W.saw("Average time per quest, 3:00."), "average across both")
+    assert(not W.saw("Gaps measured"), "the overnight wait isn't a gap")
+    W.printed = {}
+    W.cmd("report")
+    assert(W.saw("Quests logged, 1."), "plain report is still this session only")
+end)
+
+test("/qpl show opens a window with the report, both views", function()
+    local W = newWorld()
+    twoSessions(W)
+    W.cmd("show")
+    assert(W.lastText and W.lastText:find("Quests logged, 1.", 1, true), "this session in the window")
+    assert(not W.lastText:find("|c", 1, true), "color codes stripped")
+    W.cmd("show all")
+    assert(W.lastText:find("Quests logged, 2.", 1, true), "all sessions in the window")
+    eq(UISpecialFrames[1], "QuestPaceLogFrame", "Escape closes it")
+end)
+
+test("the window still opens when the client lacks the templates", function()
+    local W = newWorld()
+    W.missingTemplates = { BasicFrameTemplateWithInset = true, UIPanelScrollFrameTemplate = true, UIPanelButtonTemplate = true, UIPanelCloseButton = true }
+    twoSessions(W)
+    W.cmd("show")
+    assert(W.lastText and W.lastText:find("Quests logged, 1.", 1, true), "plain window shows the report")
+    assert(not W.saw("couldn't open"), "no failure message")
 end)
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))

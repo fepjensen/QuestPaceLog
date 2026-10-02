@@ -131,6 +131,11 @@ moment, so the turn-in line says "in a group of 3" when you weren't solo.
 /qpl report shows the session's groups, their average length, and how many
 turn-ins happened while grouped.
 
+Dashboard. /qpl show opens a window with the same report, which you can
+move, scroll, and close with Escape. Its two buttons switch between this
+session and all sessions together. You can select the text in it and copy
+it with Ctrl+C. /qpl report all prints the all-sessions report in chat.
+
 Getting the report out.
 The report prints to your chat window, so you can select and copy it from
 there. The raw data is also written to your SavedVariables file,

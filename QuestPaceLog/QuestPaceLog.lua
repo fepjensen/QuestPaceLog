@@ -39,6 +39,8 @@
 -- /qpl start          force a new session right now, without logging out
 -- /qpl                show the current session's log
 -- /qpl report         show a computed summary of the current session
+-- /qpl report all     the same summary across every session
+-- /qpl show [all]     the summary in a window you can scroll and copy from
 -- /qpl skip [name]    mark a quest as backlog, its time won't count toward
 --                      pace. No name marks the most recent entry, a name
 --                      matches the most recent logged quest containing it.
@@ -802,14 +804,41 @@ local function PrintLog()
     end
 end
 
-local function PrintReport()
-    if not session or (#session.entries == 0 and #session.dungeons == 0 and #session.rests == 0 and #session.groups == 0) then
-        print("|cff33ff99[QuestPaceLog]|r Nothing to report yet.")
-        return
+-- Every session merged into one, for /qpl report all and the window's All
+-- sessions view. entryRuns keeps each session's entries apart, so the gap
+-- between one session's last turn-in and the next session's first accept,
+-- often overnight, never counts as a gap.
+local function AllSessions()
+    local list = QuestPaceLogDB.sessions or {}
+    local all = { entries = {}, dungeons = {}, rests = {}, groups = {}, entryRuns = {}, xpTotal = 0, xpFromQuests = 0, sessionCount = #list }
+    all.startedAtStr = list[1] and list[1].startedAtStr or "?"
+    for _, one in ipairs(list) do
+        for _, k in ipairs({ "entries", "dungeons", "rests", "groups" }) do
+            for _, v in ipairs(one[k] or {}) do table.insert(all[k], v) end
+        end
+        table.insert(all.entryRuns, one.entries or {})
+        all.xpTotal = all.xpTotal + (one.xpTotal or 0)
+        all.xpFromQuests = all.xpFromQuests + (one.xpFromQuests or 0)
+    end
+    return all
+end
+
+-- The report as a list of lines, for chat and for the window. s is the
+-- current session, or AllSessions() when allTime is true.
+local function ReportLines(s, allTime)
+    local out = {}
+    local function add(line) table.insert(out, line) end
+    local scope = allTime and "across all sessions" or "this session"
+    -- Notes like "still resting" only make sense live. A record left open by
+    -- an old session's logout isn't still going.
+    local live = not allTime
+    if not s or (#s.entries == 0 and #s.dungeons == 0 and #s.rests == 0 and #s.groups == 0) then
+        add("|cff33ff99[QuestPaceLog]|r Nothing to report yet.")
+        return out
     end
 
     local closed, backlogCount = {}, 0
-    for _, e in ipairs(session.entries) do
+    for _, e in ipairs(s.entries) do
         if e.backlog then
             backlogCount = backlogCount + 1
         elseif e.durationSec then
@@ -817,8 +846,12 @@ local function PrintReport()
         end
     end
 
-    print(string.format("|cff33ff99[QuestPaceLog] Report|r, session started %s", session.startedAtStr))
-    print(string.format("Quests logged, %d. Quests with both a start and end time, %d%s.", #session.entries, #closed,
+    if allTime then
+        add(string.format("|cff33ff99[QuestPaceLog] Report|r, all %d sessions since %s", s.sessionCount, s.startedAtStr))
+    else
+        add(string.format("|cff33ff99[QuestPaceLog] Report|r, session started %s", s.startedAtStr))
+    end
+    add(string.format("Quests logged, %d. Quests with both a start and end time, %d%s.", #s.entries, #closed,
         backlogCount > 0 and string.format(" (%d more marked backlog, not counted here)", backlogCount) or ""))
 
     if #closed > 0 then
@@ -829,8 +862,8 @@ local function PrintReport()
             if e.durationSec < shortest.durationSec then shortest = e end
         end
         local avg = total / #closed
-        print(string.format("Average time per quest, %d:%02d.", math.floor(avg / 60), avg % 60))
-        print(string.format("Longest, \"%s\" at %d:%02d. Shortest, \"%s\" at %d:%02d.",
+        add(string.format("Average time per quest, %d:%02d.", math.floor(avg / 60), avg % 60))
+        add(string.format("Longest, \"%s\" at %d:%02d. Shortest, \"%s\" at %d:%02d.",
             longest.title, math.floor(longest.durationSec / 60), longest.durationSec % 60,
             shortest.title, math.floor(shortest.durationSec / 60), shortest.durationSec % 60))
     end
@@ -838,76 +871,78 @@ local function PrintReport()
     -- Gap between one quest's turn-in and the next quest's accept, a rough proxy
     -- for travel or idle time. It is not a felt-pacing judgment, keep tagging that by hand.
     local gaps = {}
-    for i = 2, #session.entries do
-        local prev, cur = session.entries[i - 1], session.entries[i]
-        if not prev.backlog and not cur.backlog and prev.turnedInAt and cur.acceptedAt and cur.acceptedAt > prev.turnedInAt then
-            table.insert(gaps, cur.acceptedAt - prev.turnedInAt)
+    for _, entries in ipairs(s.entryRuns or { s.entries }) do
+        for i = 2, #entries do
+            local prev, cur = entries[i - 1], entries[i]
+            if not prev.backlog and not cur.backlog and prev.turnedInAt and cur.acceptedAt and cur.acceptedAt > prev.turnedInAt then
+                table.insert(gaps, cur.acceptedAt - prev.turnedInAt)
+            end
         end
     end
     if #gaps > 0 then
         local gapTotal = 0
         for _, g in ipairs(gaps) do gapTotal = gapTotal + g end
         local gapAvg = gapTotal / #gaps
-        print(string.format("Gaps measured between a turn-in and the next accept, %d, average %d:%02d.", #gaps, math.floor(gapAvg / 60), gapAvg % 60))
+        add(string.format("Gaps measured between a turn-in and the next accept, %d, average %d:%02d.", #gaps, math.floor(gapAvg / 60), gapAvg % 60))
     end
 
     local levelUps = 0
-    for _, e in ipairs(session.entries) do
+    for _, e in ipairs(s.entries) do
         if e.acceptedLevel and e.turnedInLevel and e.turnedInLevel > e.acceptedLevel then
             levelUps = levelUps + 1
         end
     end
     if levelUps > 0 then
-        print(string.format("Quests during which you leveled up, %d.", levelUps))
+        add(string.format("Quests during which you leveled up, %d.", levelUps))
     end
 
     -- XP. The per-quest reward is exact, straight off the turn-in event. The
     -- split below is the honest version of "how much came from monsters,"
     -- since nothing tells this addon which kill fed which quest.
-    local xpTotal = session.xpTotal or 0
+    local xpTotal = s.xpTotal or 0
     if xpTotal > 0 then
-        local xpFromQuests = session.xpFromQuests or 0
+        local xpFromQuests = s.xpFromQuests or 0
         local xpOther = xpTotal - xpFromQuests
         local pctQuest = (xpFromQuests / xpTotal) * 100
-        print(string.format("XP earned this session, %d total, %d from quest turn-ins (%d%%), %d from everything else, kills, first-time discovery, and so on.",
-            xpTotal, xpFromQuests, math.floor(pctQuest + 0.5), xpOther))
+        add(string.format("XP earned %s, %d total, %d from quest turn-ins (%d%%), %d from everything else, kills, first-time discovery, and so on.",
+            scope, xpTotal, xpFromQuests, math.floor(pctQuest + 0.5), xpOther))
     end
 
     -- Dungeons.
-    if session.dungeons and #session.dungeons > 0 then
-        print(string.format("Dungeons this session, %d.", #session.dungeons))
-        for _, d in ipairs(session.dungeons) do
+    if s.dungeons and #s.dungeons > 0 then
+        add(string.format("Dungeons %s, %d.", scope, #s.dungeons))
+        for _, d in ipairs(s.dungeons) do
             local kills, wipes = 0, 0
             for _, b in ipairs(d.bosses or {}) do
                 if b.success then kills = kills + 1 else wipes = wipes + 1 end
             end
             if d.leftAt then
                 local levelNote = (d.enteredLevel ~= d.leftLevel) and string.format(", level %d to %d", d.enteredLevel, d.leftLevel) or ""
-                print(string.format("  %s (%s), %d:%02d, %d boss(es) down, %d wipe(s)%s",
+                add(string.format("  %s (%s), %d:%02d, %d boss(es) down, %d wipe(s)%s",
                     d.name, d.difficultyName or d.instanceType, math.floor(d.durationSec / 60), d.durationSec % 60, kills, wipes, levelNote))
-            else
-                print(string.format("  %s (%s), still inside, entered at %s", d.name, d.difficultyName or d.instanceType, d.enteredAtStr))
+            elseif live then
+                add(string.format("  %s (%s), still inside, entered at %s", d.name, d.difficultyName or d.instanceType, d.enteredAtStr))
             end
         end
     end
 
     -- Resting.
-    if session.rests and #session.rests > 0 then
+    if s.rests and #s.rests > 0 then
         local totalRest, closedRests = 0, 0
-        for _, r in ipairs(session.rests) do
+        for _, r in ipairs(s.rests) do
             if r.durationSec then
                 totalRest = totalRest + r.durationSec
                 closedRests = closedRests + 1
             end
         end
         if closedRests > 0 then
-            print(string.format("Rest periods this session, %d, totaling %d:%02d%s.", #session.rests,
-                math.floor(totalRest / 60), totalRest % 60, (#session.rests > closedRests) and " (still resting)" or ""))
-        else
-            print(string.format("Rest periods this session, %d, still resting.", #session.rests))
+            add(string.format("Rest periods %s, %d, totaling %d:%02d%s.", scope, #s.rests,
+                math.floor(totalRest / 60), totalRest % 60, (live and #s.rests > closedRests) and " (still resting)" or ""))
+        elseif live then
+            add(string.format("Rest periods this session, %d, still resting.", #s.rests))
         end
         local campCount, campTotal = 0, 0
-        for _, r in ipairs(session.rests) do
+        for _, r in ipairs(s.rests) do
             if r.campfire and r.durationSec then
                 campCount = campCount + 1
                 campTotal = campTotal + r.durationSec
@@ -915,31 +950,31 @@ local function PrintReport()
         end
         if campCount > 0 then
             local avg = campTotal / campCount
-            print(string.format("Of those, at a campfire, %d, averaging %d:%02d per stay.", campCount, math.floor(avg / 60), avg % 60))
+            add(string.format("Of those, at a campfire, %d, averaging %d:%02d per stay.", campCount, math.floor(avg / 60), avg % 60))
         end
     end
 
     -- Groups.
-    if #session.groups > 0 then
+    if #s.groups > 0 then
         local closedGroups, groupTotal, largest = 0, 0, 0
-        for _, g in ipairs(session.groups) do
+        for _, g in ipairs(s.groups) do
             if g.durationSec then closedGroups, groupTotal = closedGroups + 1, groupTotal + g.durationSec end
             if g.maxSize > largest then largest = g.maxSize end
         end
         local avg = closedGroups > 0 and groupTotal / closedGroups or 0
-        print(string.format("Groups this session, %d, largest %d%s%s.", #session.groups, largest,
+        add(string.format("Groups %s, %d, largest %d%s%s.", scope, #s.groups, largest,
             closedGroups > 0 and string.format(", average %d:%02d together", math.floor(avg / 60), avg % 60) or "",
-            (#session.groups > closedGroups) and ", still grouped" or ""))
+            (live and #s.groups > closedGroups) and ", still grouped" or ""))
     end
     local turnedIn, grouped = 0, 0
-    for _, e in ipairs(session.entries) do
+    for _, e in ipairs(s.entries) do
         if e.turnedInGroupSize then
             turnedIn = turnedIn + 1
             if e.turnedInGroupSize > 1 then grouped = grouped + 1 end
         end
     end
     if grouped > 0 then
-        print(string.format("Quests turned in while grouped, %d of %d.", grouped, turnedIn))
+        add(string.format("Quests turned in while grouped, %d of %d.", grouped, turnedIn))
     end
 
     -- Quest difficulty, across every session, not only this one.
@@ -953,12 +988,97 @@ local function PrintReport()
         if rec.droppedAt then dropped = dropped + 1 end
     end
     if tracked > 0 then
-        print(string.format("Quests tracked for difficulty, %d. Went gray while still in your log, %d (%d of those turned in anyway). Dropped without turning in, %d.",
+        add(string.format("Quests tracked for difficulty, %d. Went gray while still in your log, %d (%d of those turned in anyway). Dropped without turning in, %d.",
             tracked, wentGray, grayThenDone, dropped))
     end
 
-    print("|cff33ff99[QuestPaceLog]|r Raw data is also saved in your SavedVariables file. Paste this report, or that file's contents, back into the project and it becomes a written case study.")
+    add("|cff33ff99[QuestPaceLog]|r Raw data is also saved in your SavedVariables file. Paste this report, or that file's contents, back into the project and it becomes a written case study.")
+    return out
 end
+
+local function PrintReport(allTime)
+    for _, line in ipairs(ReportLines(allTime and AllSessions() or session, allTime)) do print(line) end
+end
+
+-- The dashboard window, /qpl show. Same lines as the report, in a movable
+-- box you can scroll, select and copy from. Built on first use, with every
+-- template call wrapped in pcall, so a client missing a template gets a
+-- plainer window instead of an error, and logging is never affected.
+local window
+
+local function TryCreate(kind, name, parent, template)
+    local ok, f = pcall(CreateFrame, kind, name, parent, template)
+    if ok and f then return f, true end
+    return CreateFrame(kind, nil, parent), false
+end
+
+local function BuildWindow()
+    local f, styled = TryCreate("Frame", "QuestPaceLogFrame", UIParent, "BasicFrameTemplateWithInset")
+    f:SetSize(560, 440)
+    f:SetPoint("CENTER")
+    f:SetFrameStrata("DIALOG")
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    if not styled then
+        local bg = f:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0, 0, 0, 0.85)
+        local close = TryCreate("Button", nil, f, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT")
+        close:SetScript("OnClick", function() f:Hide() end)
+    end
+    if UISpecialFrames then table.insert(UISpecialFrames, "QuestPaceLogFrame") end -- Escape closes it
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    title:SetPoint("TOP", 0, -6)
+    title:SetText("Quest Pace Log")
+
+    local function tab(label, x, allTime)
+        local b = TryCreate("Button", nil, f, "UIPanelButtonTemplate")
+        b:SetSize(120, 22)
+        b:SetPoint("TOPLEFT", x, -30)
+        b:SetText(label)
+        b:SetScript("OnClick", function() f.Show_(allTime) end)
+    end
+    tab("This session", 14, false)
+    tab("All sessions", 140, true)
+
+    local scroll = TryCreate("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 14, -60)
+    scroll:SetPoint("BOTTOMRIGHT", -34, 14)
+    local box = CreateFrame("EditBox", nil, scroll)
+    box:SetMultiLine(true)
+    box:SetAutoFocus(false)
+    box:SetFontObject("ChatFontNormal")
+    box:SetWidth(500)
+    box:SetScript("OnEscapePressed", function() f:Hide() end)
+    scroll:SetScrollChild(box)
+
+    function f.Show_(allTime)
+        local lines = ReportLines(allTime and AllSessions() or session, allTime)
+        local text = table.concat(lines, "\n\n"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+        box:SetText(text)
+        f.text = text
+        f:Show()
+    end
+    return f
+end
+
+local function ShowWindow(allTime)
+    if not window then
+        local ok, f = pcall(BuildWindow)
+        if not ok then
+            print("|cff33ff99[QuestPaceLog]|r The window couldn't open on this client, " .. tostring(f) .. ". /qpl report still works.")
+            return
+        end
+        window = f
+    end
+    window.Show_(allTime)
+end
+
 
 SLASH_QUESTPACELOG1 = "/qpl"
 SlashCmdList["QUESTPACELOG"] = function(msg)
@@ -968,7 +1088,9 @@ SlashCmdList["QUESTPACELOG"] = function(msg)
     if command == "start" then
         StartSession()
     elseif command == "report" then
-        PrintReport()
+        PrintReport(rest == "all")
+    elseif command == "show" then
+        ShowWindow(rest == "all")
     elseif command == "" or command == "log" then
         PrintLog()
     elseif command == "skip" then
@@ -996,6 +1118,6 @@ SlashCmdList["QUESTPACELOG"] = function(msg)
             print("|cff33ff99[QuestPaceLog]|r Watching as camp buffs, " .. table.concat(list, ", ") .. ". Use /qpl campbuff add <name> or /qpl campbuff remove <name>, and /qpl buffs to see your current buffs.")
         end
     else
-        print("|cff33ff99[QuestPaceLog]|r Commands, /qpl start for a new session, /qpl for the log, /qpl report for a summary, /qpl skip [name] to mark backlog, /qpl unskip [name] to undo, /qpl why <a-g> [name] to say why a quest was parked, /qpl buffs and /qpl campbuff for camp tracking.")
+        print("|cff33ff99[QuestPaceLog]|r Commands, /qpl start for a new session, /qpl for the log, /qpl report for a summary, /qpl report all for every session, /qpl show for a window, /qpl skip [name] to mark backlog, /qpl unskip [name] to undo, /qpl why <a-g> [name] to say why a quest was parked, /qpl buffs and /qpl campbuff for camp tracking.")
     end
 end
