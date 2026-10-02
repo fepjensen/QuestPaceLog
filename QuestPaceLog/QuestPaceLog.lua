@@ -1138,7 +1138,7 @@ local function BuildWindow()
     local report = CreateFrame("EditBox", nil, scroll)
     report:SetMultiLine(true)
     report:SetAutoFocus(false)
-    report:SetFontObject("ChatFontNormal")
+    report:SetFontObject("GameFontHighlightSmall")
     report:SetWidth(540)
     report:SetScript("OnEscapePressed", function() f:Hide() end)
     scroll:SetScrollChild(report)
@@ -1166,6 +1166,8 @@ local function BuildWindow()
             x = x + w
             if n > 0 then table.insert(parts, n .. " " .. c[1]) end
         end
+        -- Colors are recorded from 1.1 on, so older turn-ins have none.
+        if colored > 0 and st.done > colored then table.insert(parts, (st.done - colored) .. " without a recorded color") end
         colorNote:SetText(#parts > 0 and table.concat(parts, ", ") or "No quests turned in yet.")
 
         local longest = 1
@@ -1198,7 +1200,7 @@ local function BuildWindow()
                 print("|cff33ff99[QuestPaceLog]|r The tiles and bars couldn't draw, " .. tostring(err) .. ". The report below them still works.")
             end
         end
-        local plain = table.concat(ReportLines(s, allTime), "\n\n"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+        local plain = table.concat(ReportLines(s, allTime), "\n"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
         report:SetText(plain)
         f:Show()
     end
@@ -1215,6 +1217,36 @@ local function ShowWindow(allTime)
         window = f
     end
     window.Show_(allTime)
+end
+
+-- A small book button by the minimap. Left-click opens or closes the
+-- dashboard, drag moves it. The client keeps its spot in its own layout
+-- cache (SetUserPlaced), so no saved field is needed for it.
+local buttonOk, buttonErr = pcall(function()
+    local b = CreateFrame("Button", "QuestPaceLogButton", UIParent)
+    b:SetSize(28, 28)
+    b:SetFrameStrata("MEDIUM")
+    if Minimap then b:SetPoint("TOPRIGHT", Minimap, "BOTTOMLEFT", 8, 8) else b:SetPoint("RIGHT", -40, 0) end
+    b:SetNormalTexture("Interface\\Icons\\INV_Misc_Book_09")
+    b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+    b:SetMovable(true)
+    b:SetClampedToScreen(true)
+    b:RegisterForDrag("LeftButton")
+    b:SetScript("OnDragStart", b.StartMoving)
+    b:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); self:SetUserPlaced(true) end)
+    b:SetScript("OnClick", function()
+        if window and window:IsShown() then window:Hide() else ShowWindow(false) end
+    end)
+    b:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:SetText("Quest Pace Log")
+        GameTooltip:AddLine("Click to open or close the dashboard. Drag to move.", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end)
+if not buttonOk then
+    print("|cff33ff99[QuestPaceLog]|r The dashboard button couldn't be made on this client, " .. tostring(buttonErr) .. ". /qpl show still works.")
 end
 
 SLASH_QUESTPACELOG1 = "/qpl"

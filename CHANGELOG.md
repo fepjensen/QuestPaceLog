@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6, 2026-10-01
+
+- A book button by the minimap opens and closes the dashboard. Drag it to move it. The game remembers where you put it in its own layout file, so nothing new is saved by the addon.
+- The dashboard's report text uses the same smaller font as the rest of the window, without blank lines between rows, so more of it fits.
+- The quest color note counts turn-ins without a recorded color, those from before 1.1.
+- No change to the saved data format. 1.5's window confirmed working in the real Forever client on 2026-10-01. The button isn't verified yet.
+
 ## 1.5, 2026-10-01
 
 - The /qpl show window is now visual. Four tiles at the top show quests turned in, average time per quest, the share of XP from quests, and time resting with campfire stays. Below them are a bar for XP from quests against everything else, a bar of quest colors at turn-in in the quest log's own colors, and the last 8 finished quests as bars, so a slow one stands out. The full text report is still underneath and can be copied.

@@ -131,8 +131,9 @@ moment, so the turn-in line says "in a group of 3" when you weren't solo.
 /qpl report shows the session's groups, their average length, and how many
 turn-ins happened while grouped.
 
-Dashboard. /qpl show opens a window you can move, scroll, and close with
-Escape. At the top, tiles show quests turned in, average time per quest,
+Dashboard. /qpl show, or a click on the book button by the minimap, opens
+a window you can move, scroll, and close with Escape. Drag the book button
+to put it wherever you like, the game remembers the spot. At the top, tiles show quests turned in, average time per quest,
 the share of your XP from quests, and time resting. Below them, a bar
 splits your XP between quests and everything else, another shows the
 colors your quests had at turn-in, and your last 8 finished quests appear

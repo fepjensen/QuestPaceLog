@@ -49,9 +49,11 @@ local function newWorld(opts)
         return setmetatable(f, { __index = function() return function() end end })
     end
     W.missingTemplates, W.texts = {}, {}
-    _G.CreateFrame = function(_, _, _, template)
+    _G.CreateFrame = function(_, name, _, template)
         if template and W.missingTemplates[template] then error("Couldn't find inherited node " .. template) end
-        return fakeFrame()
+        local f = fakeFrame()
+        if name then _G[name] = f end
+        return f
     end
     _G.UIParent, _G.UISpecialFrames = nil, {}
     _G.C_QuestLog, _G.GetNumQuestLogEntries, _G.GetQuestLogTitle = nil, nil, nil
@@ -433,6 +435,9 @@ test("dashboard tiles and bars show the right numbers, and refresh on turn-in", 
     assert(W.texts["2"], "quests turned in tile")
     assert(W.texts["3:00"], "average per quest tile")
     assert(W.texts["2 yellow"], "quest color note")
+    QuestPaceLogDB.sessions[1].entries[1].colorAtTurnIn = nil
+    W.cmd("show all")
+    assert(W.texts["1 yellow, 1 without a recorded color"], "turn-ins from before colors were recorded")
     assert(W.texts["Second Day"] and W.texts["4:00"], "recent quest row")
     W.cmd("show")
     W.texts = {}
@@ -442,6 +447,17 @@ test("dashboard tiles and bars show the right numbers, and refresh on turn-in", 
     W.removeQuest(902)
     W.fire("QUEST_TURNED_IN", 902, 100, 0)
     assert(W.texts["Third Quest"], "open window refreshed after a turn-in")
+end)
+
+test("the book button opens and closes the dashboard", function()
+    local W = newWorld()
+    twoSessions(W)
+    local b = _G.QuestPaceLogButton
+    assert(b and b.OnClick, "button exists")
+    b.OnClick()
+    assert(W.texts["Second Day"], "click opens the dashboard")
+    b.OnClick()
+    eq(_G.QuestPaceLogFrame.shown, false, "second click closes it")
 end)
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
