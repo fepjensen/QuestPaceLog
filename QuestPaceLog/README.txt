@@ -124,6 +124,13 @@ type /qpl buffs to see your buffs' exact names, then /qpl campbuff add
 followed by the name. /qpl campbuff on its own shows the list, and
 /qpl campbuff remove takes a name off it.
 
+Groups. Joining and leaving a group is logged with how long the group held
+together and how many people were in it, counting you. Only the count is
+kept, never who was in it. Each turn-in also notes the group size at that
+moment, so the turn-in line says "in a group of 3" when you weren't solo.
+/qpl report shows the session's groups, their average length, and how many
+turn-ins happened while grouped.
+
 Getting the report out.
 The report prints to your chat window, so you can select and copy it from
 there. The raw data is also written to your SavedVariables file,
@@ -137,7 +144,7 @@ watching.
 
 Known limitation.
 This uses QUEST_ACCEPTED, QUEST_TURNED_IN, QUEST_WATCH_LIST_CHANGED,
-PLAYER_XP_UPDATE, ENCOUNTER_END, PLAYER_UPDATE_RESTING, PLAYER_LEVEL_UP, and UNIT_AURA (your own buffs only), plus the game's own quest log functions to read each quest's level. All of these
+PLAYER_XP_UPDATE, ENCOUNTER_END, PLAYER_UPDATE_RESTING, PLAYER_LEVEL_UP, UNIT_AURA (your own buffs only), and GROUP_ROSTER_UPDATE (group size only), plus the game's own quest log functions to read each quest's level. All of these
 are long-standing, widely used events, the same ones dungeon and XP addons
 have relied on for years, but Forever is still in beta, so if any of them
 stops firing or fires with different data, the affected part will just go

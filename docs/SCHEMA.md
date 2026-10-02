@@ -29,6 +29,7 @@ One per login. A /reload within six hours continues the same session.
 | dungeons | array of dungeon | dungeon visits this session |
 | rests | array of rest | rested-state periods this session |
 | campBuffs | array of camp buff | camp buffs gained this session (1.2) |
+| groups | array of group | groups joined this session (1.3) |
 
 ## Entry (one quest, within one session)
 
@@ -48,6 +49,7 @@ A quest accepted in one session and turned in during a later one appears as two 
 | turnedInZone, turnedInSubZone, turnedInMapID | as above | where the player was at turn-in (1.2) |
 | colorAtTurnIn | string or nil | quest color at turn-in (1.1) |
 | xpReward | number | XP paid at turn-in, from QUEST_TURNED_IN |
+| turnedInGroupSize | number or nil | people in your group at turn-in, you included, 1 when solo. nil on turn-ins before 1.3 (1.3) |
 | durationSec | number or nil | turn-in minus accept, only when both are in this session |
 | backlog | true or nil | set by untracking the quest or by /qpl skip, cleared by tracking again or /qpl unskip |
 | reason | letter a to g or nil | optional note from /qpl why (1.1). Not used as evidence |
@@ -66,6 +68,7 @@ A quest accepted in one session and turned in during a later one appears as two 
 | droppedAt, droppedLevel | left the log without a turn-in. Cleared if later turned in |
 | turnedInAt, turnedInLevel, xpReward, colorAtTurnIn | turn-in |
 | turnedInZone, turnedInSubZone, turnedInMapID | where, at turn-in (1.2) |
+| turnedInGroupSize | group size at turn-in, as on the entry (1.3) |
 | reason | copy of the entry's /qpl why letter |
 
 Picking a quest back up after turning it in or dropping it starts a fresh record for that questID.
@@ -81,6 +84,10 @@ startedAt, startedAtStr, endedAt, endedAtStr, durationSec. From 1.2 also zone an
 ## Camp buff (1.2)
 
 name, gainedAt, gainedAtStr, zone, subZone, and endedAt, endedAtStr when the buff went away. Camp buffs last about an hour after leaving the fire, so gainedAt to endedAt is the buff's life, not the stay. The stay is the length of the rest period the buff tagged.
+
+## Group (1.3)
+
+joinedAt, joinedAtStr, joinedLevel, zone, subZone (where you joined), leftAt, leftAtStr, durationSec, maxSize, and sizes, an array of { at, size } with one item for each change in size, the first being the size at joining. Sizes count you. alreadyGrouped is true when you were already in the group at login or reload, so joinedAt is that moment rather than the real join. A group still open when you log out keeps no leftAt, and the next login opens a fresh record flagged alreadyGrouped. No names or other data about the members are kept.
 
 ## Colors
 

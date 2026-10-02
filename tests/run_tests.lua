@@ -27,6 +27,9 @@ local function newWorld(opts)
     _G.GetSubZoneText = function() return W.subZone end
     _G.C_Map = { GetBestMapForUnit = function() return 2248 end }
     _G.UnitBuff = function(_, i) return W.buffs[i] end
+    W.group = 0
+    _G.GetNumGroupMembers = function() return W.group end
+    _G.GetNumRaidMembers, _G.GetNumPartyMembers = nil, nil
     _G.C_UnitAuras = nil
     _G.GetQuestGreenRange = nil
     _G.SlashCmdList = {}
@@ -286,6 +289,74 @@ test("modern aura API (C_UnitAuras) is used when present", function()
     modern[1] = { name = "Boosted Rest", spellId = 1 }
     W.fire("UNIT_AURA", "player")
     eq(#QuestPaceLogDB.sessions[1].campBuffs, 1, "gain seen through C_UnitAuras")
+end)
+
+test("joining and leaving a group records times and sizes, never names", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.group = 2
+    W.fire("GROUP_ROSTER_UPDATE")
+    W.clock = W.clock + 60
+    W.group = 3
+    W.fire("GROUP_ROSTER_UPDATE")
+    W.fire("GROUP_ROSTER_UPDATE")
+    W.clock = W.clock + 60
+    W.group = 0
+    W.fire("GROUP_ROSTER_UPDATE")
+    local g = QuestPaceLogDB.sessions[1].groups[1]
+    eq(#QuestPaceLogDB.sessions[1].groups, 1, "one group")
+    eq(g.durationSec, 120, "group length")
+    eq(g.maxSize, 3, "largest size")
+    eq(#g.sizes, 2, "size changes, repeats ignored")
+    eq(g.sizes[1].size, 2, "first size")
+    eq(g.zone, "Tirisfal Glades", "zone where joined")
+    eq(g.alreadyGrouped, nil, "a real join")
+    W.cmd("report")
+    assert(W.saw("Groups this session, 1, largest 3, average 2:00 together"), "group line in the report")
+end)
+
+test("turn-ins note the group size, 1 when solo", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(800, "Solo Quest", 8)
+    W.fire("QUEST_ACCEPTED", 800)
+    W.removeQuest(800)
+    W.fire("QUEST_TURNED_IN", 800, 100, 0)
+    W.group = 4
+    W.fire("GROUP_ROSTER_UPDATE")
+    W.addQuest(801, "Group Quest", 8)
+    W.fire("QUEST_ACCEPTED", 801)
+    W.removeQuest(801)
+    W.fire("QUEST_TURNED_IN", 801, 100, 0)
+    local entries = QuestPaceLogDB.sessions[1].entries
+    eq(entries[1].turnedInGroupSize, 1, "solo turn-in")
+    eq(entries[2].turnedInGroupSize, 4, "grouped turn-in")
+    eq(QuestPaceLogDB.quests[801].turnedInGroupSize, 4, "size on the quest record")
+    assert(W.saw("in a group of 4"), "group size in the turn-in line")
+    W.cmd("report")
+    assert(W.saw("Quests turned in while grouped, 1 of 2."), "grouped count in the report")
+end)
+
+test("a group already joined at login is flagged, reload continues it", function()
+    local W = newWorld()
+    W.group = 5
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.fire("PLAYER_ENTERING_WORLD", false, true)
+    eq(#QuestPaceLogDB.sessions[1].groups, 1, "reload doesn't open a second group")
+    eq(QuestPaceLogDB.sessions[1].groups[1].alreadyGrouped, true, "flagged as already grouped")
+end)
+
+test("older Classic party and raid counts work", function()
+    local W = newWorld()
+    _G.GetNumGroupMembers = nil
+    local party, raid = 2, 0
+    _G.GetNumPartyMembers = function() return party end
+    _G.GetNumRaidMembers = function() return raid end
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    eq(QuestPaceLogDB.sessions[1].groups[1].maxSize, 3, "party count plus you")
+    raid = 12
+    W.fire("RAID_ROSTER_UPDATE")
+    eq(QuestPaceLogDB.sessions[1].groups[1].maxSize, 12, "raid count includes you")
 end)
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))

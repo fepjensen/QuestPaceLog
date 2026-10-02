@@ -27,6 +27,9 @@
 --   ("Boosted Rest" by default, more with /qpl campbuff add). A rest period
 --   in which one arrives is marked as a campfire rest, and its length is how
 --   long you stayed at the fire.
+-- Groups. When you join and leave a group, how long it held together, and
+--   its size over time. Only the count of members, never who they are. Each
+--   quest turn-in also notes the group size at that moment, 1 when solo.
 -- Quest difficulty. Each quest's own level at accept, the quest log color
 --   it had then (red, orange, yellow, green, gray), and, across sessions,
 --   the level at which it turned green, turned gray, or was dropped from the
@@ -75,6 +78,7 @@ local function EnsureSessionShape(s)
     s.dungeons = s.dungeons or {}
     s.rests = s.rests or {}
     s.campBuffs = s.campBuffs or {}
+    s.groups = s.groups or {}
     return s
 end
 
@@ -528,6 +532,49 @@ local function SyncCampBuffs(snapshotOnly)
     activeCampBuffs = active
 end
 
+-- Groups. How many people are in your group, you included, 1 when solo. A
+-- count only, the addon never looks at who the other members are.
+local function GroupSize()
+    if GetNumGroupMembers then
+        local ok, n = pcall(GetNumGroupMembers)
+        if ok and type(n) == "number" and n > 0 then return n end
+        return 1
+    end
+    -- Older Classic API. The raid count includes you, the party count doesn't.
+    local raid = GetNumRaidMembers and GetNumRaidMembers() or 0
+    if raid > 0 then return raid end
+    return (GetNumPartyMembers and GetNumPartyMembers() or 0) + 1
+end
+
+-- Opens a group record on joining, notes each size change, closes it on
+-- leaving. atLoad marks a group you were already in at login or reload, so
+-- its joinedAt is that moment, not the real join.
+local function SyncGroupState(atLoad)
+    if not session then return end
+    local size = GroupSize()
+    local last = session.groups[#session.groups]
+    local open = last and not last.leftAt and last or nil
+    local now = time()
+    if size > 1 and not open then
+        local zone, sub = CurrentZone()
+        open = { joinedAt = now, joinedAtStr = date("%H:%M:%S", now), joinedLevel = UnitLevel("player"),
+            zone = zone, subZone = sub, sizes = {}, maxSize = size, alreadyGrouped = atLoad or nil }
+        table.insert(session.groups, open)
+        print(string.format("|cff33ff99[QuestPaceLog]|r %s a group of %d.", atLoad and "Already in" or "Joined", size))
+    elseif size <= 1 and open then
+        open.leftAt, open.leftAtStr, open.durationSec = now, date("%H:%M:%S", now), now - open.joinedAt
+        print(string.format("|cff33ff99[QuestPaceLog]|r Left the group after %d:%02d.", math.floor(open.durationSec / 60), open.durationSec % 60))
+        return
+    end
+    if open then
+        local lastSize = open.sizes[#open.sizes]
+        if not lastSize or lastSize.size ~= size then
+            table.insert(open.sizes, { at = now, size = size })
+            if size > open.maxSize then open.maxSize = size end
+        end
+    end
+end
+
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("QUEST_ACCEPTED")
@@ -538,6 +585,11 @@ frame:RegisterEvent("ENCOUNTER_END")
 frame:RegisterEvent("PLAYER_UPDATE_RESTING")
 frame:RegisterEvent("PLAYER_LEVEL_UP")
 frame:RegisterEvent("UNIT_AURA")
+-- GROUP_ROSTER_UPDATE on newer clients, the other two on older Classic ones.
+-- Registering an event a client doesn't know raises an error, hence pcall.
+for _, ev in ipairs({ "GROUP_ROSTER_UPDATE", "PARTY_MEMBERS_CHANGED", "RAID_ROSTER_UPDATE" }) do
+    pcall(frame.RegisterEvent, frame, ev)
+end
 
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_ENTERING_WORLD" then
@@ -561,6 +613,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             ScanQuestDifficulty()
             SyncCampBuffs(true)
         end
+        SyncGroupState(isInitialLogin or isReloadingUi)
         return
     end
 
@@ -623,12 +676,14 @@ frame:SetScript("OnEvent", function(self, event, ...)
         entry.turnedInLevel = level
         entry.turnedInZone, entry.turnedInSubZone, entry.turnedInMapID = CurrentZone()
         entry.xpReward = xpReward
+        entry.turnedInGroupSize = GroupSize()
         local rec = QuestTracker()[questID]
         if rec then
             entry.questLevel = entry.questLevel or rec.questLevel
             rec.turnedInAt, rec.turnedInLevel, rec.xpReward = now, level, xpReward
             rec.turnedInZone, rec.turnedInSubZone, rec.turnedInMapID = entry.turnedInZone, entry.turnedInSubZone, entry.turnedInMapID
             rec.droppedAt, rec.droppedLevel = nil, nil
+            rec.turnedInGroupSize = entry.turnedInGroupSize
         end
         entry.colorAtTurnIn = DifficultyOf(entry.questLevel, level)
         if rec then rec.colorAtTurnIn = entry.colorAtTurnIn end
@@ -650,8 +705,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
             levelNote = string.format(" at level %d", level)
         end
         local turnWhere = ZoneLabel(entry.turnedInZone, entry.turnedInSubZone)
-        print(string.format("|cff33ff99[QuestPaceLog]|r %s turned in \"%s\"%s%s%s%s", entry.turnedInElapsed, entry.title, suffix, xpNote, levelNote,
-            turnWhere and (" in " .. turnWhere) or ""))
+        print(string.format("|cff33ff99[QuestPaceLog]|r %s turned in \"%s\"%s%s%s%s%s", entry.turnedInElapsed, entry.title, suffix, xpNote, levelNote,
+            turnWhere and (" in " .. turnWhere) or "",
+            entry.turnedInGroupSize > 1 and string.format(", in a group of %d", entry.turnedInGroupSize) or ""))
 
     elseif event == "QUEST_WATCH_LIST_CHANGED" then
         -- Fires whenever a quest is added to or removed from your on-screen
@@ -713,6 +769,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "UNIT_AURA" then
         local unit = ...
         if unit == "player" then SyncCampBuffs(false) end
+
+    elseif event == "GROUP_ROSTER_UPDATE" or event == "PARTY_MEMBERS_CHANGED" or event == "RAID_ROSTER_UPDATE" then
+        SyncGroupState(false)
     end
 end)
 
@@ -730,7 +789,7 @@ local function PrintLog()
             levelStr = string.format("level %s", tostring(e.turnedInLevel or e.acceptedLevel or "?"))
         end
         local xpStr = (e.xpReward and e.xpReward > 0) and string.format(", %d xp", e.xpReward) or ""
-        local turnStr = e.turnedInElapsed and (e.turnedInElapsed .. " turned in") or "still open"
+        local turnStr = e.turnedInElapsed and (e.turnedInElapsed .. " turned in" .. ((e.turnedInGroupSize or 1) > 1 and string.format(" in a group of %d", e.turnedInGroupSize) or "")) or "still open"
         local qlvlStr = e.questLevel and string.format(", quest level %d", e.questLevel) or ""
         local reasonStr = e.reason and (", " .. REASONS[e.reason]) or ""
         local fromWhere = ZoneLabel(e.acceptedZone, e.acceptedSubZone)
@@ -744,7 +803,7 @@ local function PrintLog()
 end
 
 local function PrintReport()
-    if not session or (#session.entries == 0 and #session.dungeons == 0 and #session.rests == 0) then
+    if not session or (#session.entries == 0 and #session.dungeons == 0 and #session.rests == 0 and #session.groups == 0) then
         print("|cff33ff99[QuestPaceLog]|r Nothing to report yet.")
         return
     end
@@ -858,6 +917,29 @@ local function PrintReport()
             local avg = campTotal / campCount
             print(string.format("Of those, at a campfire, %d, averaging %d:%02d per stay.", campCount, math.floor(avg / 60), avg % 60))
         end
+    end
+
+    -- Groups.
+    if #session.groups > 0 then
+        local closedGroups, groupTotal, largest = 0, 0, 0
+        for _, g in ipairs(session.groups) do
+            if g.durationSec then closedGroups, groupTotal = closedGroups + 1, groupTotal + g.durationSec end
+            if g.maxSize > largest then largest = g.maxSize end
+        end
+        local avg = closedGroups > 0 and groupTotal / closedGroups or 0
+        print(string.format("Groups this session, %d, largest %d%s%s.", #session.groups, largest,
+            closedGroups > 0 and string.format(", average %d:%02d together", math.floor(avg / 60), avg % 60) or "",
+            (#session.groups > closedGroups) and ", still grouped" or ""))
+    end
+    local turnedIn, grouped = 0, 0
+    for _, e in ipairs(session.entries) do
+        if e.turnedInGroupSize then
+            turnedIn = turnedIn + 1
+            if e.turnedInGroupSize > 1 then grouped = grouped + 1 end
+        end
+    end
+    if grouped > 0 then
+        print(string.format("Quests turned in while grouped, %d of %d.", grouped, turnedIn))
     end
 
     -- Quest difficulty, across every session, not only this one.

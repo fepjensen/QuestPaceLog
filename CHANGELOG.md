@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3, 2026-10-01
+
+- Groups. Each session has a new `groups` list. A group record opens when you join, notes every change in size, and closes when you leave, with how long it lasted. Only member counts are kept, never names or anything else about other players.
+- Each quest turn-in records `turnedInGroupSize`, on the entry and on the quest record, 1 when solo.
+- The turn-in chat line ends with "in a group of N" when grouped. /qpl shows it, and /qpl report shows the session's groups, their average length, the largest size, and how many turn-ins happened in a group.
+- Reads GetNumGroupMembers, or the older GetNumPartyMembers and GetNumRaidMembers. Not yet verified in the real Forever client.
+
 ## 1.2, 2026-09-30
 
 - Zone, subzone and map ID at every accept and turn-in, on the entry and on the quest record. Zone and subzone at the start of every rest period. The /qpl log shows where a quest took you.
