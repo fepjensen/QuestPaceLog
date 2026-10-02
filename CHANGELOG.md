@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5, 2026-10-01
+
+- The /qpl show window is now visual. Four tiles at the top show quests turned in, average time per quest, the share of XP from quests, and time resting with campfire stays. Below them are a bar for XP from quests against everything else, a bar of quest colors at turn-in in the quest log's own colors, and the last 8 finished quests as bars, so a slow one stands out. The full text report is still underneath and can be copied.
+- The window refreshes on its own when you turn in a quest while it's open.
+- No change to the saved data format. Not yet verified in the real Forever client. If the tiles and bars can't draw, chat says so once and the text report still shows.
+
 ## 1.4, 2026-10-01
 
 - /qpl show opens a dashboard window with the report, and buttons for This session and All sessions. It can be moved, scrolled, and closed with Escape, and its text can be selected and copied. /qpl show all opens straight on All sessions.

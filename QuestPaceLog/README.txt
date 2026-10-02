@@ -131,8 +131,13 @@ moment, so the turn-in line says "in a group of 3" when you weren't solo.
 /qpl report shows the session's groups, their average length, and how many
 turn-ins happened while grouped.
 
-Dashboard. /qpl show opens a window with the same report, which you can
-move, scroll, and close with Escape. Its two buttons switch between this
+Dashboard. /qpl show opens a window you can move, scroll, and close with
+Escape. At the top, tiles show quests turned in, average time per quest,
+the share of your XP from quests, and time resting. Below them, a bar
+splits your XP between quests and everything else, another shows the
+colors your quests had at turn-in, and your last 8 finished quests appear
+as bars so a slow one stands out. The full report is underneath. The
+window updates by itself when you turn in a quest while it's open. Its two buttons switch between this
 session and all sessions together. You can select the text in it and copy
 it with Ctrl+C. /qpl report all prints the all-sessions report in chat.
 

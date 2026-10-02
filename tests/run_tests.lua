@@ -40,12 +40,15 @@ local function newWorld(opts)
     local function fakeFrame()
         local f = {}
         f.SetScript = function(self, what, fn) if what == "OnEvent" then handler = fn end; self[what] = fn end
-        f.SetText = function(self, t) self.shownText = t; W.lastText = t end
+        f.SetText = function(self, t) self.shownText = t; W.lastText = t; W.texts[t] = true end
+        f.Show = function(self) self.shown = true end
+        f.Hide = function(self) self.shown = false end
+        f.IsShown = function(self) return self.shown end
         f.CreateFontString = function() return fakeFrame() end
         f.CreateTexture = function() return fakeFrame() end
         return setmetatable(f, { __index = function() return function() end end })
     end
-    W.missingTemplates = {}
+    W.missingTemplates, W.texts = {}, {}
     _G.CreateFrame = function(_, _, _, template)
         if template and W.missingTemplates[template] then error("Couldn't find inherited node " .. template) end
         return fakeFrame()
@@ -420,6 +423,25 @@ test("the window still opens when the client lacks the templates", function()
     W.cmd("show")
     assert(W.lastText and W.lastText:find("Quests logged, 1.", 1, true), "plain window shows the report")
     assert(not W.saw("couldn't open"), "no failure message")
+end)
+
+test("dashboard tiles and bars show the right numbers, and refresh on turn-in", function()
+    local W = newWorld()
+    twoSessions(W)
+    W.cmd("show all")
+    assert(not W.saw("couldn't draw"), "visuals drew without an error")
+    assert(W.texts["2"], "quests turned in tile")
+    assert(W.texts["3:00"], "average per quest tile")
+    assert(W.texts["2 yellow"], "quest color note")
+    assert(W.texts["Second Day"] and W.texts["4:00"], "recent quest row")
+    W.cmd("show")
+    W.texts = {}
+    W.addQuest(902, "Third Quest", 8)
+    W.fire("QUEST_ACCEPTED", 902)
+    W.clock = W.clock + 60
+    W.removeQuest(902)
+    W.fire("QUEST_TURNED_IN", 902, 100, 0)
+    assert(W.texts["Third Quest"], "open window refreshed after a turn-in")
 end)
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
