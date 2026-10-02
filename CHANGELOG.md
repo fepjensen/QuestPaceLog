@@ -5,7 +5,7 @@
 - Zone, subzone and map ID at every accept and turn-in, on the entry and on the quest record. Zone and subzone at the start of every rest period. The /qpl log shows where a quest took you.
 - Campfire stays. Watches the player's own buffs (UNIT_AURA on "player") for camp buffs, "Boosted Rest" by default. A rest period in which one arrives is tagged campfire, and its length is the stay. Camp buffs gained are also logged per session. /qpl report shows campfire stays and their average.
 - /qpl buffs lists current buffs. /qpl campbuff add, remove, or on its own to show the watched list, stored in QuestPaceLogDB.campBuffNames.
-- Supports both aura APIs, C_UnitAuras.GetAuraDataByIndex and UnitBuff. Not yet verified in the real Forever client.
+- Supports both aura APIs, C_UnitAuras.GetAuraDataByIndex and UnitBuff. Confirmed working in the real Forever client on 2026-10-01.
 
 ## 1.1, 2026-09-30
 
