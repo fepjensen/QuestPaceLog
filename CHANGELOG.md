@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7, 2026-10-03
+
+- Sessions record `lastActiveAt`, the last moment anything happened, including logout. Time played is lastActiveAt minus startedAt. Older sessions estimate it from their latest timestamp.
+- XP per minute played, in /qpl report and in the dashboard. Counts only sessions that tracked XP. Each recent quest in the dashboard also shows its own XP a minute.
+- A session with XP but no quests now gets a report instead of "Nothing to report yet."
+- Bigger dashboard, 780 by 740. Five tiles (quests turned in, average per quest, XP per minute, time played, resting). Three donut charts replace the bars, for XP from quests against everything else, quest colors at turn-in, and solo against grouped turn-ins. Recent quest bars take the quest's own color. Section headings, gold accents, thousands separators, and the active view's button stays highlighted.
+- The donuts are drawn from plain color textures, rotated when the client allows it. Not yet verified in the real Forever client.
+
 ## 1.6, 2026-10-01
 
 - A book button by the minimap opens and closes the dashboard. Drag it to move it. The game remembers where you put it in its own layout file, so nothing new is saved by the addon.

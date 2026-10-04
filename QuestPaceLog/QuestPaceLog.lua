@@ -578,6 +578,7 @@ local function SyncGroupState(atLoad)
 end
 
 local window -- the /qpl show dashboard, built on first use
+local PlayedSec, XPPerMinute
 
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -589,6 +590,7 @@ frame:RegisterEvent("ENCOUNTER_END")
 frame:RegisterEvent("PLAYER_UPDATE_RESTING")
 frame:RegisterEvent("PLAYER_LEVEL_UP")
 frame:RegisterEvent("UNIT_AURA")
+frame:RegisterEvent("PLAYER_LOGOUT")
 -- GROUP_ROSTER_UPDATE on newer clients, the other two on older Classic ones.
 -- Registering an event a client doesn't know raises an error, hence pcall.
 for _, ev in ipairs({ "GROUP_ROSTER_UPDATE", "PARTY_MEMBERS_CHANGED", "RAID_ROSTER_UPDATE" }) do
@@ -624,6 +626,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
     if not session then
         return -- a quest event landed before PLAYER_ENTERING_WORLD resolved, safety net only
     end
+    -- The last moment anything happened, so a session's play time is known
+    -- after logout. PLAYER_LOGOUT needs nothing else.
+    session.lastActiveAt = time()
 
     if event == "QUEST_ACCEPTED" then
         local questID = ...
@@ -807,6 +812,29 @@ local function PrintLog()
     end
 end
 
+-- How long a session was played, start to its last recorded moment. Sessions
+-- from before 1.7 have no lastActiveAt, so their latest timestamp stands in.
+-- The live session runs to now.
+function PlayedSec(s)
+    local last = s.lastActiveAt or s.startedAt
+    if s == session then last = time() end
+    if not s.lastActiveAt then
+        for _, e in ipairs(s.entries or {}) do last = math.max(last, e.acceptedAt or 0, e.turnedInAt or 0) end
+        for _, r in ipairs(s.rests or {}) do last = math.max(last, r.endedAt or r.startedAt or 0) end
+        for _, d in ipairs(s.dungeons or {}) do last = math.max(last, d.leftAt or d.enteredAt or 0) end
+        for _, g in ipairs(s.groups or {}) do last = math.max(last, g.leftAt or g.joinedAt or 0) end
+    end
+    return s.startedAt and math.max(0, last - s.startedAt) or nil
+end
+
+-- XP per minute played, counting only sessions that tracked XP.
+function XPPerMinute(s)
+    local xp = s.xpTotal or 0
+    local played = s.entryRuns and s.xpPlayedSec or (xp > 0 and PlayedSec(s))
+    if xp <= 0 or not played or played < 60 then return nil end
+    return xp / (played / 60)
+end
+
 -- Every session merged into one, for /qpl report all and the window's All
 -- sessions view. entryRuns keeps each session's entries apart, so the gap
 -- between one session's last turn-in and the next session's first accept,
@@ -822,6 +850,7 @@ local function AllSessions()
         table.insert(all.entryRuns, one.entries or {})
         all.xpTotal = all.xpTotal + (one.xpTotal or 0)
         all.xpFromQuests = all.xpFromQuests + (one.xpFromQuests or 0)
+        if (one.xpTotal or 0) > 0 then all.xpPlayedSec = (all.xpPlayedSec or 0) + (PlayedSec(one) or 0) end
     end
     return all
 end
@@ -835,7 +864,7 @@ local function ReportLines(s, allTime)
     -- Notes like "still resting" only make sense live. A record left open by
     -- an old session's logout isn't still going.
     local live = not allTime
-    if not s or (#s.entries == 0 and #s.dungeons == 0 and #s.rests == 0 and #s.groups == 0) then
+    if not s or (#s.entries == 0 and #s.dungeons == 0 and #s.rests == 0 and #s.groups == 0 and (s.xpTotal or 0) == 0) then
         add("|cff33ff99[QuestPaceLog]|r Nothing to report yet.")
         return out
     end
@@ -909,6 +938,8 @@ local function ReportLines(s, allTime)
         local pctQuest = (xpFromQuests / xpTotal) * 100
         add(string.format("XP earned %s, %d total, %d from quest turn-ins (%d%%), %d from everything else, kills, first-time discovery, and so on.",
             scope, xpTotal, xpFromQuests, math.floor(pctQuest + 0.5), xpOther))
+        local perMin = XPPerMinute(s)
+        if perMin then add(string.format("XP per minute played, %d.", math.floor(perMin + 0.5))) end
     end
 
     -- Dungeons.
@@ -1003,24 +1034,27 @@ local function PrintReport(allTime)
     for _, line in ipairs(ReportLines(allTime and AllSessions() or session, allTime)) do print(line) end
 end
 
--- The dashboard window, /qpl show. Tiles and bars for a quick look while
--- playing, and below them the full report, which you can scroll, select and
--- copy from. Built on first use, with every template call wrapped in pcall,
--- so a client missing a template gets a plainer window instead of an error,
--- and logging is never affected.
+-- The dashboard window, /qpl show. Tiles, donuts and bars for a quick look
+-- while playing, and below them the full report, which you can scroll,
+-- select and copy from. Built on first use, with every template call
+-- wrapped in pcall, so a client missing a template gets a plainer window
+-- instead of an error, and logging is never affected.
 local function TryCreate(kind, name, parent, template)
     local ok, f = pcall(CreateFrame, kind, name, parent, template)
     if ok and f then return f, true end
     return CreateFrame(kind, nil, parent), false
 end
 
--- The numbers the tiles and bars show, for a session or AllSessions().
+-- The numbers the tiles, donuts and bars show, for a session or AllSessions().
 local function DashboardStats(s)
     local st = { done = 0, closedCount = 0, closedTotal = 0, xpTotal = s.xpTotal or 0, xpFromQuests = s.xpFromQuests or 0,
-        restSec = 0, campStays = 0, colors = {}, recent = {} }
+        restSec = 0, campStays = 0, colors = {}, recent = {}, solo = 0, grouped = 0, playedSec = 0 }
     for _, e in ipairs(s.entries) do
         if e.turnedInAt then st.done = st.done + 1 end
         if e.colorAtTurnIn then st.colors[e.colorAtTurnIn] = (st.colors[e.colorAtTurnIn] or 0) + 1 end
+        if e.turnedInGroupSize then
+            if e.turnedInGroupSize > 1 then st.grouped = st.grouped + 1 else st.solo = st.solo + 1 end
+        end
         if e.durationSec and not e.backlog then
             st.closedCount, st.closedTotal = st.closedCount + 1, st.closedTotal + e.durationSec
             table.insert(st.recent, e)
@@ -1033,6 +1067,12 @@ local function DashboardStats(s)
             if r.campfire then st.campStays = st.campStays + 1 end
         end
     end
+    if s.entryRuns then
+        for _, one in ipairs(QuestPaceLogDB.sessions or {}) do st.playedSec = st.playedSec + (PlayedSec(one) or 0) end
+    else
+        st.playedSec = PlayedSec(s) or 0
+    end
+    st.xpPerMin = XPPerMinute(s)
     return st
 end
 
@@ -1042,17 +1082,29 @@ local function Clock(sec)
     return string.format("%d:%02d", math.floor(sec / 60), sec % 60)
 end
 
+-- 25090 becomes 25,090.
+local function Thousands(n)
+    local s = tostring(math.floor(n + 0.5))
+    local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+    return (out:gsub("^,", ""))
+end
+
 local QUEST_COLORS = {
     { "red", 1, 0.1, 0.1 }, { "orange", 1, 0.5, 0.25 }, { "yellow", 1, 1, 0 }, { "green", 0.25, 0.75, 0.25 }, { "gray", 0.5, 0.5, 0.5 },
 }
-local BAR_FULL, BAR_LEFT, BAR_MAX = 572, 250, 260
+local GOLD, SLATE, VIOLET = { 1, 0.82, 0 }, { 0.42, 0.45, 0.52 }, { 0.62, 0.45, 1 }
+local WIN_W, WIN_H, PAD = 780, 740, 16
+local INNER = WIN_W - PAD * 2
+local BAR_LEFT, BAR_MAX = 300, 300
+local DONUT_DOTS, DONUT_R, DONUT_THICK = 96, 40, 13
 
 local function BuildWindow()
     local f, styled = TryCreate("Frame", "QuestPaceLogFrame", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(600, 580)
+    f:SetSize(WIN_W, WIN_H)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
+    f:SetClampedToScreen(true)
     f:EnableMouse(true)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
@@ -1072,11 +1124,11 @@ local function BuildWindow()
         fs:SetPoint(point or "TOPLEFT", x, y)
         return fs
     end
-    local function box(x, y, w, h, r, g, b, a)
+    local function box(x, y, w, h, c, a)
         local t = f:CreateTexture(nil, "ARTWORK")
         t:SetPoint("TOPLEFT", x, y)
         t:SetSize(w, h)
-        t:SetColorTexture(r, g, b, a or 1)
+        t:SetColorTexture(c[1], c[2], c[3], a or 1)
         return t
     end
     -- Moves a bar to its spot and width, hidden when it has nothing to show.
@@ -1087,101 +1139,152 @@ local function BuildWindow()
         t:SetWidth(w)
         t:Show()
     end
+    local function heading(y, label)
+        text(PAD, y, "GameFontNormal"):SetText(label)
+        box(PAD, y - 16, INNER, 1, GOLD, 0.25)
+    end
 
     text(0, -6, "GameFontHighlight", "TOP"):SetText("Quest Pace Log")
 
+    local tabs = {}
     local function tab(label, x, allTime)
         local b = TryCreate("Button", nil, f, "UIPanelButtonTemplate")
-        b:SetSize(120, 22)
-        b:SetPoint("TOPLEFT", x, -30)
+        b:SetSize(130, 22)
+        b:SetPoint("TOPLEFT", x, -32)
         b:SetText(label)
         b:SetScript("OnClick", function() f.Show_(allTime) end)
+        tabs[allTime] = b
     end
-    tab("This session", 14, false)
-    tab("All sessions", 140, true)
-    local scopeText = text(-16, -36, "GameFontNormalSmall", "TOPRIGHT")
+    tab("This session", PAD, false)
+    tab("All sessions", PAD + 138, true)
+    local scopeText = text(-PAD - 4, -38, "GameFontNormalSmall", "TOPRIGHT")
 
-    -- Four tiles.
-    local tiles = {}
-    for i = 1, 4 do
-        local x = 14 + (i - 1) * 146
-        box(x, -62, 138, 52, 1, 1, 1, 0.06)
-        tiles[i] = { value = text(x + 8, -68, "GameFontNormalLarge"), label = text(x + 8, -94) }
+    -- Five tiles, each with a gold line on top.
+    local tiles, tileW = {}, (INNER - 4 * 8) / 5
+    for i = 1, 5 do
+        local x = PAD + (i - 1) * (tileW + 8)
+        box(x, -64, tileW, 58, { 1, 1, 1 }, 0.06)
+        box(x, -64, tileW, 2, GOLD, 0.8)
+        tiles[i] = { value = text(x + 10, -74, "GameFontNormalLarge"), label = text(x + 10, -100) }
     end
 
-    -- XP split and quest colors, one horizontal bar each.
-    text(14, -126, "GameFontNormal"):SetText("XP from quests and from everything else")
-    local xpQuest = box(14, -144, 1, 16, 1, 0.82, 0)
-    local xpOther = box(14, -144, 1, 16, 0.35, 0.35, 0.4)
-    local xpNote = text(14, -164)
+    -- Donuts. A ring of short bars around a circle, each colored by the
+    -- share of the whole it falls in. Plain color textures only, rotated
+    -- to follow the ring when the client can rotate them.
+    local function donut(cx, cy, title)
+        local d = { dots = {} }
+        text(cx, cy + DONUT_R + 26, "GameFontNormalSmall", "CENTER"):SetText(title)
+        local seg = 2 * math.pi * DONUT_R / DONUT_DOTS + 1.5
+        for i = 1, DONUT_DOTS do
+            local angle = math.pi / 2 - (i - 0.5) / DONUT_DOTS * 2 * math.pi
+            local t = f:CreateTexture(nil, "ARTWORK")
+            t:SetSize(seg, DONUT_THICK)
+            t:SetPoint("CENTER", f, "TOPLEFT", cx + DONUT_R * math.cos(angle), cy + DONUT_R * math.sin(angle))
+            if t.SetRotation then pcall(t.SetRotation, t, angle - math.pi / 2) end
+            d.dots[i] = t
+        end
+        d.center = text(cx, cy, "GameFontNormalLarge", "CENTER")
+        d.legend = text(cx + DONUT_R + 22, cy + 20)
+        d.legend:SetJustifyH("LEFT")
+        return d
+    end
+    -- parts is a list of { count, color, label }. The center shows the first part's share.
+    local function fill(d, parts, emptyNote, extra)
+        local total = 0
+        for _, p in ipairs(parts) do total = total + p[1] end
+        for i, t in ipairs(d.dots) do
+            local c, a = SLATE, 0.25
+            if total > 0 then
+                local at, sum = (i - 0.5) / DONUT_DOTS * total, 0
+                for _, p in ipairs(parts) do
+                    sum = sum + p[1]
+                    if at <= sum then c, a = p[2], 1 break end
+                end
+            end
+            t:SetColorTexture(c[1], c[2], c[3], a)
+        end
+        d.center:SetText(total > 0 and (math.floor(parts[1][1] / total * 100 + 0.5) .. "%") or "")
+        local lines = {}
+        for _, p in ipairs(parts) do
+            if p[1] > 0 then
+                table.insert(lines, string.format("|cff%02x%02x%02x%s|r %s", math.floor(p[2][1] * 255), math.floor(p[2][2] * 255), math.floor(p[2][3] * 255), Thousands(p[1]), p[3]))
+            end
+        end
+        if #lines > 0 and extra then table.insert(lines, extra) end
+        d.legend:SetText(#lines > 0 and table.concat(lines, "\n") or emptyNote)
+    end
 
-    text(14, -186, "GameFontNormal"):SetText("Quest colors at turn-in")
-    local colorBars = {}
-    for i, c in ipairs(QUEST_COLORS) do colorBars[i] = box(14, -204, 1, 16, c[2], c[3], c[4]) end
-    local colorNote = text(14, -224)
+    heading(-136, "Where your XP, quest colors and turn-ins come from")
+    local colW = INNER / 3
+    local donuts = {
+        xp = donut(PAD + 60, -222, "XP"),
+        colors = donut(PAD + colW + 60, -222, "Quest color at turn-in"),
+        group = donut(PAD + 2 * colW + 60, -222, "Solo or grouped"),
+    }
 
-    -- Recent quests, newest at the bottom, bar length against the longest.
-    text(14, -246, "GameFontNormal"):SetText("Last finished quests")
+    -- Recent quests, newest at the bottom, bar length against the longest,
+    -- colored the way the quest log colored the quest at turn-in.
+    heading(-300, "Last finished quests")
     local rows = {}
     for i = 1, 8 do
-        local y = -264 - (i - 1) * 18
-        local name = text(14, y)
-        name:SetWidth(BAR_LEFT - 22)
+        local y = -324 - (i - 1) * 20
+        local name = text(PAD, y)
+        name:SetWidth(BAR_LEFT - PAD - 10)
         name:SetJustifyH("LEFT")
         if name.SetWordWrap then name:SetWordWrap(false) end
-        rows[i] = { name = name, bar = box(BAR_LEFT, y - 2, 1, 12, 0.3, 0.6, 1), time = text(BAR_LEFT, y) }
+        rows[i] = { name = name, bar = box(BAR_LEFT, y - 1, 1, 12, { 0.3, 0.6, 1 }), time = text(BAR_LEFT, y) }
     end
 
+    heading(-494, "Full report")
     local scroll = TryCreate("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 14, -414)
-    scroll:SetPoint("BOTTOMRIGHT", -34, 14)
+    scroll:SetPoint("TOPLEFT", PAD, -518)
+    scroll:SetPoint("BOTTOMRIGHT", -PAD - 22, 14)
     local report = CreateFrame("EditBox", nil, scroll)
     report:SetMultiLine(true)
     report:SetAutoFocus(false)
     report:SetFontObject("GameFontHighlightSmall")
-    report:SetWidth(540)
+    report:SetWidth(INNER - 30)
     report:SetScript("OnEscapePressed", function() f:Hide() end)
     scroll:SetScrollChild(report)
 
     function f.UpdateVisuals(st)
         local avg = st.closedCount > 0 and st.closedTotal / st.closedCount or nil
-        local pct = st.xpTotal > 0 and math.floor(st.xpFromQuests / st.xpTotal * 100 + 0.5) or nil
         tiles[1].value:SetText(tostring(st.done)); tiles[1].label:SetText("quests turned in")
         tiles[2].value:SetText(avg and Clock(avg) or "none yet"); tiles[2].label:SetText("average per quest")
-        tiles[3].value:SetText(pct and (pct .. "%") or "none yet"); tiles[3].label:SetText("of XP from quests")
-        tiles[4].value:SetText(Clock(st.restSec)); tiles[4].label:SetText(string.format("resting, %d at campfires", st.campStays))
+        tiles[3].value:SetText(st.xpPerMin and Thousands(st.xpPerMin) or "none yet"); tiles[3].label:SetText("XP per minute played")
+        tiles[4].value:SetText(Clock(st.playedSec)); tiles[4].label:SetText("time played")
+        tiles[5].value:SetText(Clock(st.restSec)); tiles[5].label:SetText(string.format("resting, %d at campfires", st.campStays))
 
-        local questW = st.xpTotal > 0 and math.floor(BAR_FULL * st.xpFromQuests / st.xpTotal) or 0
-        place(xpQuest, 14, -144, questW)
-        place(xpOther, 14 + questW, -144, st.xpTotal > 0 and BAR_FULL - questW or 0)
-        xpNote:SetText(st.xpTotal > 0 and string.format("%d from quests, %d from everything else", st.xpFromQuests, st.xpTotal - st.xpFromQuests) or "No XP gained yet.")
-
-        local colored, parts = 0, {}
-        for _, c in ipairs(QUEST_COLORS) do colored = colored + (st.colors[c[1]] or 0) end
-        local x = 14
-        for i, c in ipairs(QUEST_COLORS) do
+        fill(donuts.xp, { { st.xpFromQuests, GOLD, "from quests" }, { math.max(0, st.xpTotal - st.xpFromQuests), SLATE, "from everything else" } }, "No XP gained yet.")
+        local colorParts, colored = {}, 0
+        for _, c in ipairs(QUEST_COLORS) do
             local n = st.colors[c[1]] or 0
-            local w = colored > 0 and math.floor(BAR_FULL * n / colored) or 0
-            place(colorBars[i], x, -204, w)
-            x = x + w
-            if n > 0 then table.insert(parts, n .. " " .. c[1]) end
+            colored = colored + n
+            table.insert(colorParts, { n, { c[2], c[3], c[4] }, c[1] })
         end
+        -- Sort so the center shows the most common color.
+        table.sort(colorParts, function(a, b) return a[1] > b[1] end)
         -- Colors are recorded from 1.1 on, so older turn-ins have none.
-        if colored > 0 and st.done > colored then table.insert(parts, (st.done - colored) .. " without a recorded color") end
-        colorNote:SetText(#parts > 0 and table.concat(parts, ", ") or "No quests turned in yet.")
+        fill(donuts.colors, colorParts, "No quests turned in yet.",
+            (colored > 0 and st.done > colored) and ((st.done - colored) .. " without a recorded color") or nil)
+        fill(donuts.group, { { st.grouped, VIOLET, "in a group" }, { st.solo, SLATE, "solo" } }, "No turn-ins since 1.3.")
 
         local longest = 1
         for _, e in ipairs(st.recent) do if e.durationSec > longest then longest = e.durationSec end end
         for i, row in ipairs(rows) do
             local e = st.recent[i]
             if e then
-                local y = -264 - (i - 1) * 18
+                local y = -324 - (i - 1) * 20
                 local w = math.max(2, math.floor(BAR_MAX * e.durationSec / longest))
+                local color = { 0.3, 0.6, 1 }
+                for _, c in ipairs(QUEST_COLORS) do if c[1] == e.colorAtTurnIn then color = { c[2], c[3], c[4] } end end
                 row.name:SetText(e.title or "?")
-                place(row.bar, BAR_LEFT, y - 2, w)
+                row.bar:SetColorTexture(color[1], color[2], color[3], 1)
+                place(row.bar, BAR_LEFT, y - 1, w)
                 row.time:ClearAllPoints()
                 row.time:SetPoint("TOPLEFT", BAR_LEFT + w + 6, y)
-                row.time:SetText(Clock(e.durationSec))
+                local perMin = (e.xpReward and e.xpReward > 0 and e.durationSec >= 60) and string.format(", %s XP a minute", Thousands(e.xpReward / (e.durationSec / 60))) or ""
+                row.time:SetText(Clock(e.durationSec) .. perMin)
                 row.name:Show(); row.time:Show()
             else
                 row.name:Hide(); row.bar:Hide(); row.time:Hide()
@@ -1193,11 +1296,14 @@ local function BuildWindow()
         f.allTime = allTime
         local s = allTime and AllSessions() or session
         scopeText:SetText(allTime and "Showing all sessions" or "Showing this session")
+        for which, b in pairs(tabs) do
+            if which == allTime then b:LockHighlight() else b:UnlockHighlight() end
+        end
         if s then
             local ok, err = pcall(f.UpdateVisuals, DashboardStats(s))
             if not ok and not f.warned then
                 f.warned = true
-                print("|cff33ff99[QuestPaceLog]|r The tiles and bars couldn't draw, " .. tostring(err) .. ". The report below them still works.")
+                print("|cff33ff99[QuestPaceLog]|r The tiles and charts couldn't draw, " .. tostring(err) .. ". The report below them still works.")
             end
         end
         local plain = table.concat(ReportLines(s, allTime), "\n"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")

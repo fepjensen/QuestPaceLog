@@ -134,10 +134,11 @@ turn-ins happened while grouped.
 Dashboard. /qpl show, or a click on the book button by the minimap, opens
 a window you can move, scroll, and close with Escape. Drag the book button
 to put it wherever you like, the game remembers the spot. At the top, tiles show quests turned in, average time per quest,
-the share of your XP from quests, and time resting. Below them, a bar
-splits your XP between quests and everything else, another shows the
-colors your quests had at turn-in, and your last 8 finished quests appear
-as bars so a slow one stands out. The full report is underneath. The
+XP per minute played, time played, and time resting. Below them, three
+donut charts show where your XP came from, the colors your quests had at
+turn-in, and how many turn-ins were solo or in a group. Your last 8
+finished quests appear as bars in their quest color, with their XP a
+minute, so a slow one stands out. The full report is underneath. The
 window updates by itself when you turn in a quest while it's open. Its two buttons switch between this
 session and all sessions together. You can select the text in it and copy
 it with Ctrl+C. /qpl report all prints the all-sessions report in chat.

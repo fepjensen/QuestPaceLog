@@ -427,6 +427,14 @@ test("the window still opens when the client lacks the templates", function()
     assert(not W.saw("couldn't open"), "no failure message")
 end)
 
+-- True when any text the window set contains the fragment, color codes removed.
+local function shown(W, fragment)
+    for t in pairs(W.texts) do
+        if t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):find(fragment, 1, true) then return true end
+    end
+    return false
+end
+
 test("dashboard tiles and bars show the right numbers, and refresh on turn-in", function()
     local W = newWorld()
     twoSessions(W)
@@ -434,11 +442,12 @@ test("dashboard tiles and bars show the right numbers, and refresh on turn-in", 
     assert(not W.saw("couldn't draw"), "visuals drew without an error")
     assert(W.texts["2"], "quests turned in tile")
     assert(W.texts["3:00"], "average per quest tile")
-    assert(W.texts["2 yellow"], "quest color note")
+    assert(shown(W, "2 yellow"), "quest color legend")
+    assert(shown(W, "100%"), "donut center")
     QuestPaceLogDB.sessions[1].entries[1].colorAtTurnIn = nil
     W.cmd("show all")
-    assert(W.texts["1 yellow, 1 without a recorded color"], "turn-ins from before colors were recorded")
-    assert(W.texts["Second Day"] and W.texts["4:00"], "recent quest row")
+    assert(shown(W, "1 yellow\n1 without a recorded color"), "turn-ins from before colors were recorded")
+    assert(W.texts["Second Day"] and W.texts["4:00, 25 XP a minute"], "recent quest row with XP a minute")
     W.cmd("show")
     W.texts = {}
     W.addQuest(902, "Third Quest", 8)
@@ -458,6 +467,27 @@ test("the book button opens and closes the dashboard", function()
     assert(W.texts["Second Day"], "click opens the dashboard")
     b.OnClick()
     eq(_G.QuestPaceLogFrame.shown, false, "second click closes it")
+end)
+
+test("XP per minute and time played, live and after logout", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.clock = W.clock + 600
+    QuestPaceLogDB.sessions[1].xpTotal = 3000
+    W.fire("PLAYER_LOGOUT")
+    eq(QuestPaceLogDB.sessions[1].lastActiveAt, W.clock, "last active saved at logout")
+    W.cmd("report")
+    assert(W.saw("XP per minute played, 300."), "300 XP a minute over 10 minutes")
+    W.cmd("show")
+    assert(W.texts["300"] and W.texts["10:00"], "XP a minute and time played tiles")
+end)
+
+test("old sessions without lastActiveAt use their latest timestamp for play time", function()
+    local W = newWorld({ db = { sessions = { { startedAt = 1000, startedAtStr = "old", xpTotal = 1200, xpFromQuests = 0,
+        entries = { { questID = 1, title = "Old", acceptedAt = 1100, turnedInAt = 1600, durationSec = 500 } } } } } })
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.cmd("report all")
+    assert(W.saw("XP per minute played, 120."), "1200 XP over the 10 minutes the old session's data spans")
 end)
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))

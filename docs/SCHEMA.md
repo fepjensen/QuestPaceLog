@@ -30,6 +30,7 @@ One per login. A /reload within six hours continues the same session.
 | rests | array of rest | rested-state periods this session |
 | campBuffs | array of camp buff | camp buffs gained this session (1.2) |
 | groups | array of group | groups joined this session (1.3) |
+| lastActiveAt | number or nil | epoch seconds of the last event the addon saw this session, including logout. lastActiveAt minus startedAt is the time played. nil on sessions before 1.7, where the latest timestamp in the session is the best estimate (1.7) |
 
 ## Entry (one quest, within one session)
 

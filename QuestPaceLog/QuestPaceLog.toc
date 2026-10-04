@@ -2,7 +2,7 @@
 ## Title: Quest Pace Log
 ## Notes: Timestamps the exact moment a quest is accepted and turned in, and prints a pacing report.
 ## Author: Felipe Jensen
-## Version: 1.6
+## Version: 1.7
 ## SavedVariablesPerCharacter: QuestPaceLogDB
 
 QuestPaceLog.lua
