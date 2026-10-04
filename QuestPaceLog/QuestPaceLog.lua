@@ -92,6 +92,7 @@ local function StartSession()
     session = EnsureSessionShape({
         startedAt = time(),
         startedAtStr = date("%Y-%m-%d %H:%M:%S"),
+        startLevel = UnitLevel("player"),
         entries = {},
     })
     table.insert(QuestPaceLogDB.sessions, session)
@@ -578,7 +579,7 @@ local function SyncGroupState(atLoad)
 end
 
 local window -- the /qpl show dashboard, built on first use
-local PlayedSec, XPPerMinute
+local PlayedSec, XPPerMinute, LevelTimes
 
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -774,6 +775,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
         -- The new level arrives as the event's argument, UnitLevel can still
         -- report the old one at this exact moment.
         local newLevel = ...
+        session.levelUps = session.levelUps or {}
+        table.insert(session.levelUps, { level = newLevel, at = time() })
         ScanQuestDifficulty(newLevel)
 
     elseif event == "UNIT_AURA" then
@@ -825,6 +828,26 @@ function PlayedSec(s)
         for _, g in ipairs(s.groups or {}) do last = math.max(last, g.leftAt or g.joinedAt or 0) end
     end
     return s.startedAt and math.max(0, last - s.startedAt) or nil
+end
+
+-- Seconds played at each level, { [level] = seconds }, from sessions that
+-- know their starting level (1.8 on). Each session runs from its start
+-- through every level-up to its last active moment, so time logged out
+-- never counts.
+function LevelTimes(s)
+    local out = {}
+    for _, one in ipairs(s.entryRuns and (QuestPaceLogDB.sessions or {}) or { s }) do
+        if one.startLevel and one.startedAt then
+            local t0, lvl = one.startedAt, one.startLevel
+            for _, lu in ipairs(one.levelUps or {}) do
+                out[lvl] = (out[lvl] or 0) + math.max(0, lu.at - t0)
+                t0, lvl = lu.at, lu.level
+            end
+            local last = (one == session) and time() or (one.lastActiveAt or t0)
+            out[lvl] = (out[lvl] or 0) + math.max(0, last - t0)
+        end
+    end
+    return out
 end
 
 -- XP per minute played, counting only sessions that tracked XP.
@@ -1011,6 +1034,16 @@ local function ReportLines(s, allTime)
         add(string.format("Quests turned in while grouped, %d of %d.", grouped, turnedIn))
     end
 
+    -- Time at each level.
+    local levels, parts = LevelTimes(s), {}
+    for lvl, sec in pairs(levels) do table.insert(parts, { lvl, sec }) end
+    table.sort(parts, function(a, b) return a[1] < b[1] end)
+    if #parts > 0 then
+        local strs = {}
+        for _, p in ipairs(parts) do table.insert(strs, string.format("level %d %d:%02d", p[1], math.floor(p[2] / 60), p[2] % 60)) end
+        add("Time played at each level, " .. table.concat(strs, ", ") .. ".")
+    end
+
     -- Quest difficulty, across every session, not only this one.
     local tracked, wentGray, grayThenDone, dropped = 0, 0, 0, 0
     for _, rec in pairs(QuestTracker()) do
@@ -1073,6 +1106,7 @@ local function DashboardStats(s)
         st.playedSec = PlayedSec(s) or 0
     end
     st.xpPerMin = XPPerMinute(s)
+    st.levelTimes = LevelTimes(s)
     return st
 end
 
@@ -1093,14 +1127,35 @@ local QUEST_COLORS = {
     { "red", 1, 0.1, 0.1 }, { "orange", 1, 0.5, 0.25 }, { "yellow", 1, 1, 0 }, { "green", 0.25, 0.75, 0.25 }, { "gray", 0.5, 0.5, 0.5 },
 }
 local GOLD, SLATE, VIOLET = { 1, 0.82, 0 }, { 0.42, 0.45, 0.52 }, { 0.62, 0.45, 1 }
-local WIN_W, WIN_H, PAD = 780, 740, 16
+local WIN_W, WIN_H, PAD = 780, 820, 16
 local INNER = WIN_W - PAD * 2
 local BAR_LEFT, BAR_MAX = 300, 300
 local DONUT_DOTS, DONUT_R, DONUT_THICK = 96, 40, 13
 
+-- 1h05 or 42m, for the narrow level columns.
+local function Short(sec)
+    if sec >= 3600 then return string.format("%dh%02d", math.floor(sec / 3600), math.floor(sec % 3600 / 60)) end
+    return string.format("%dm", math.floor(sec / 60))
+end
+
 local function BuildWindow()
     local f, styled = TryCreate("Frame", "QuestPaceLogFrame", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(WIN_W, WIN_H)
+    -- No taller than the screen. The corner grip makes it taller or shorter.
+    local height, screenH = WIN_H, UIParent and UIParent.GetHeight and UIParent:GetHeight()
+    if type(screenH) == "number" and screenH > 0 then height = math.min(WIN_H, screenH - 20) end
+    f:SetSize(WIN_W, height)
+    f:SetResizable(true)
+    if not (f.SetResizeBounds and pcall(f.SetResizeBounds, f, WIN_W, 560, WIN_W, 2000)) then
+        if f.SetMinResize then pcall(f.SetMinResize, f, WIN_W, 560) end
+        if f.SetMaxResize then pcall(f.SetMaxResize, f, WIN_W, 2000) end
+    end
+    local grip = CreateFrame("Button", nil, f)
+    grip:SetSize(16, 16)
+    grip:SetPoint("BOTTOMRIGHT", -4, 4)
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    grip:SetScript("OnMouseDown", function() f:StartSizing("BOTTOMRIGHT") end)
+    grip:SetScript("OnMouseUp", function() f:StopMovingOrSizing() end)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
@@ -1232,12 +1287,47 @@ local function BuildWindow()
         name:SetWidth(BAR_LEFT - PAD - 10)
         name:SetJustifyH("LEFT")
         if name.SetWordWrap then name:SetWordWrap(false) end
-        rows[i] = { name = name, bar = box(BAR_LEFT, y - 1, 1, 12, { 0.3, 0.6, 1 }), time = text(BAR_LEFT, y) }
+        -- An invisible strip over the row, so hovering shows the quest's details.
+        local hit = CreateFrame("Frame", nil, f)
+        hit:SetPoint("TOPLEFT", PAD, y + 3)
+        hit:SetSize(INNER, 18)
+        hit:EnableMouse(true)
+        local row = { name = name, bar = box(BAR_LEFT, y - 1, 1, 12, { 0.3, 0.6, 1 }), time = text(BAR_LEFT, y), hit = hit }
+        hit:SetScript("OnEnter", function(self)
+            local e = row.e
+            if not e or not GameTooltip then return end
+            GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+            GameTooltip:SetText(e.title or "?")
+            if e.questLevel then GameTooltip:AddLine(string.format("Quest level %d, %s at turn-in", e.questLevel, e.colorAtTurnIn or "no color recorded"), 1, 1, 1) end
+            if e.acceptedLevel and e.turnedInLevel and e.acceptedLevel ~= e.turnedInLevel then
+                GameTooltip:AddLine(string.format("You went from level %d to %d", e.acceptedLevel, e.turnedInLevel), 1, 1, 1)
+            elseif e.turnedInLevel then
+                GameTooltip:AddLine(string.format("You were level %d", e.turnedInLevel), 1, 1, 1)
+            end
+            local from, to = ZoneLabel(e.acceptedZone, e.acceptedSubZone), ZoneLabel(e.turnedInZone, e.turnedInSubZone)
+            if from and to and from ~= to then GameTooltip:AddLine("From " .. from .. " to " .. to, 1, 1, 1)
+            elseif from or to then GameTooltip:AddLine("In " .. (from or to), 1, 1, 1) end
+            local xp = (e.xpReward and e.xpReward > 0) and e.xpReward or nil
+            GameTooltip:AddLine(Clock(e.durationSec) .. (xp and string.format(", %s XP, %s XP a minute", Thousands(xp), Thousands(xp / math.max(1, e.durationSec / 60))) or ""), 1, 1, 1)
+            if (e.turnedInGroupSize or 1) > 1 then GameTooltip:AddLine(string.format("In a group of %d", e.turnedInGroupSize), 1, 1, 1) end
+            GameTooltip:Show()
+        end)
+        hit:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+        rows[i] = row
     end
 
-    heading(-494, "Full report")
+    -- Time at each level, one column per level, newest levels on the right.
+    heading(-494, "Time played at each level")
+    local LEVEL_BASE, LEVEL_MAX_H, LEVEL_COLS = -580, 50, 20
+    local levelCols = {}
+    for i = 1, LEVEL_COLS do
+        levelCols[i] = { bar = box(PAD, LEVEL_BASE, 1, 1, GOLD, 0.85), time = text(0, 0, "GameFontHighlightSmall", "CENTER"), level = text(0, 0, "GameFontNormalSmall", "CENTER") }
+    end
+    local levelNote = text(PAD, -520)
+
+    heading(-612, "Full report")
     local scroll = TryCreate("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", PAD, -518)
+    scroll:SetPoint("TOPLEFT", PAD, -636)
     scroll:SetPoint("BOTTOMRIGHT", -PAD - 22, 14)
     local report = CreateFrame("EditBox", nil, scroll)
     report:SetMultiLine(true)
@@ -1269,6 +1359,33 @@ local function BuildWindow()
             (colored > 0 and st.done > colored) and ((st.done - colored) .. " without a recorded color") or nil)
         fill(donuts.group, { { st.grouped, VIOLET, "in a group" }, { st.solo, SLATE, "solo" } }, "No turn-ins since 1.3.")
 
+        local levels = {}
+        for lvl, sec in pairs(st.levelTimes) do table.insert(levels, { lvl, sec }) end
+        table.sort(levels, function(a, b) return a[1] < b[1] end)
+        while #levels > LEVEL_COLS do table.remove(levels, 1) end
+        local most = 1
+        for _, l in ipairs(levels) do if l[2] > most then most = l[2] end end
+        local colW = math.min(36, math.floor(INNER / math.max(1, #levels)))
+        levelNote:SetText(#levels == 0 and "Recording starts with version 1.8. Sessions before it don't know when you leveled." or "")
+        for i, col in ipairs(levelCols) do
+            local l = levels[i]
+            if l then
+                local x, h = PAD + (i - 1) * colW, math.max(2, math.floor(LEVEL_MAX_H * l[2] / most))
+                col.bar:ClearAllPoints()
+                col.bar:SetPoint("BOTTOMLEFT", f, "TOPLEFT", x + 3, LEVEL_BASE)
+                col.bar:SetSize(colW - 6, h)
+                col.time:ClearAllPoints()
+                col.time:SetPoint("CENTER", f, "TOPLEFT", x + colW / 2, LEVEL_BASE + h + 8)
+                col.time:SetText(Short(l[2]))
+                col.level:ClearAllPoints()
+                col.level:SetPoint("CENTER", f, "TOPLEFT", x + colW / 2, LEVEL_BASE - 10)
+                col.level:SetText(tostring(l[1]))
+                col.bar:Show(); col.time:Show(); col.level:Show()
+            else
+                col.bar:Hide(); col.time:Hide(); col.level:Hide()
+            end
+        end
+
         local longest = 1
         for _, e in ipairs(st.recent) do if e.durationSec > longest then longest = e.durationSec end end
         for i, row in ipairs(rows) do
@@ -1285,9 +1402,11 @@ local function BuildWindow()
                 row.time:SetPoint("TOPLEFT", BAR_LEFT + w + 6, y)
                 local perMin = (e.xpReward and e.xpReward > 0 and e.durationSec >= 60) and string.format(", %s XP a minute", Thousands(e.xpReward / (e.durationSec / 60))) or ""
                 row.time:SetText(Clock(e.durationSec) .. perMin)
-                row.name:Show(); row.time:Show()
+                row.e = e
+                row.name:Show(); row.time:Show(); row.hit:Show()
             else
-                row.name:Hide(); row.bar:Hide(); row.time:Hide()
+                row.e = nil
+                row.name:Hide(); row.bar:Hide(); row.time:Hide(); row.hit:Hide()
             end
         end
     end

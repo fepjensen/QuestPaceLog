@@ -39,7 +39,12 @@ local function newWorld(opts)
     -- the window's text, so tests can check what the window shows.
     local function fakeFrame()
         local f = {}
-        f.SetScript = function(self, what, fn) if what == "OnEvent" then handler = fn end; self[what] = fn end
+        f.SetScript = function(self, what, fn)
+            if what == "OnEvent" then handler = fn end
+            if what == "OnEnter" then table.insert(W.hovers, function() fn(self) end) end
+            self[what] = fn
+        end
+        f.SetSize = function(_, w, h) if w == 780 then W.windowHeight = h end end
         f.SetText = function(self, t) self.shownText = t; W.lastText = t; W.texts[t] = true end
         f.Show = function(self) self.shown = true end
         f.Hide = function(self) self.shown = false end
@@ -48,7 +53,7 @@ local function newWorld(opts)
         f.CreateTexture = function() return fakeFrame() end
         return setmetatable(f, { __index = function() return function() end end })
     end
-    W.missingTemplates, W.texts = {}, {}
+    W.missingTemplates, W.texts, W.hovers = {}, {}, {}
     _G.CreateFrame = function(_, name, _, template)
         if template and W.missingTemplates[template] then error("Couldn't find inherited node " .. template) end
         local f = fakeFrame()
@@ -488,6 +493,52 @@ test("old sessions without lastActiveAt use their latest timestamp for play time
     W.fire("PLAYER_ENTERING_WORLD", true, false)
     W.cmd("report all")
     assert(W.saw("XP per minute played, 120."), "1200 XP over the 10 minutes the old session's data spans")
+end)
+
+test("time played at each level, from the start level through level-ups", function()
+    local W = newWorld({ level = 8 })
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.clock = W.clock + 600
+    W.level = 9
+    W.fire("PLAYER_LEVEL_UP", 9)
+    W.clock = W.clock + 300
+    QuestPaceLogDB.sessions[1].xpTotal = 900 -- leveling always comes with XP
+    W.fire("PLAYER_LOGOUT")
+    eq(QuestPaceLogDB.sessions[1].startLevel, 8, "start level saved")
+    eq(QuestPaceLogDB.sessions[1].levelUps[1].level, 9, "level-up saved")
+    W.cmd("report")
+    assert(W.saw("Time played at each level, level 8 10:00, level 9 5:00."), "level times in the report")
+    W.cmd("show")
+    assert(W.texts["10m"] and W.texts["5m"], "level columns in the window")
+end)
+
+test("hovering a recent quest shows its details", function()
+    local W = newWorld()
+    local lines = {}
+    _G.GameTooltip = setmetatable({
+        SetText = function(_, t) table.insert(lines, t) end,
+        AddLine = function(_, t) table.insert(lines, t) end,
+    }, { __index = function() return function() end end })
+    twoSessions(W)
+    W.cmd("show")
+    -- OnEnter scripts in creation order. The book button comes first, then
+    -- the eight quest rows, and this session's one quest sits in row 1.
+    eq(#W.hovers, 9, "button plus eight hover strips")
+    W.hovers[2]()
+    local all = table.concat(lines, " | ")
+    assert(all:find("Second Day", 1, true), "title in the tooltip, got " .. all)
+    assert(all:find("In Brill, Tirisfal Glades", 1, true), "zone in the tooltip")
+    assert(all:find("4:00, 100 XP, 25 XP a minute", 1, true), "time and XP in the tooltip")
+    _G.GameTooltip = nil
+end)
+
+test("the window is never taller than the screen", function()
+    local W = newWorld()
+    _G.UIParent = { GetHeight = function() return 700 end }
+    twoSessions(W)
+    W.cmd("show")
+    eq(W.windowHeight, 680, "clamped to the screen")
+    _G.UIParent = nil
 end)
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))

@@ -138,7 +138,9 @@ XP per minute played, time played, and time resting. Below them, three
 donut charts show where your XP came from, the colors your quests had at
 turn-in, and how many turn-ins were solo or in a group. Your last 8
 finished quests appear as bars in their quest color, with their XP a
-minute, so a slow one stands out. The full report is underneath. The
+minute, so a slow one stands out. Hover one to see its details. Columns
+show the time you played at each level, from version 1.8 on. Drag the
+window's bottom right corner to make it taller or shorter. The full report is underneath. The
 window updates by itself when you turn in a quest while it's open. Its two buttons switch between this
 session and all sessions together. You can select the text in it and copy
 it with Ctrl+C. /qpl report all prints the all-sessions report in chat.

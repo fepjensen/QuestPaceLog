@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8, 2026-10-03
+
+- Sessions record `startLevel` and `levelUps`, a list of each level reached and when. Time played at each level is worked out from those, within sessions only, so time logged out never counts. Shown in /qpl report and as columns in the dashboard. Sessions before 1.8 have neither, so they aren't counted.
+- Hovering a quest in the dashboard's recent quests shows its quest level and color, your level, where it took you, its time, XP and XP a minute, and its group size.
+- The dashboard can be made taller or shorter by dragging its bottom right corner, and it never opens taller than the screen.
+- Not yet verified in the real Forever client.
+
 ## 1.7, 2026-10-03
 
 - Sessions record `lastActiveAt`, the last moment anything happened, including logout. Time played is lastActiveAt minus startedAt. Older sessions estimate it from their latest timestamp.
