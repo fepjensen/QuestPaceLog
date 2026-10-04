@@ -23,7 +23,7 @@ Felips is a lawyer building a career in game design criticism, not a programmer.
 - `tests/run_tests.lua` the test harness
 - `docs/SCHEMA.md` the saved data format
 - `CHANGELOG.md`
-- `tools/export_site.py` builds the site Lab page data file (schemaVersion 2) from every saved file and dated backup, read only. `python tools/test_export_site.py` checks it
+- `tools/export_site.py` builds the site Lab page data file (schemaVersion 3) from every saved file and dated backup, read only. `python tools/test_export_site.py` checks it
 - `update-site.ps1` runs the export into `F:\Claude Code\portfolio`, checks the site builds, and commits and pushes (deploys) only after Felips types y
 
 ## Deploying

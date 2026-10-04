@@ -52,4 +52,10 @@ assert long_one["status"] == "backlog", "turned-in backlog quest"
 assert c["sessions"][0]["loggedSec"] == 400, "logged time counts the rest ending at 1400"
 assert c["summary"]["pacedCount"] == 1 and c["summary"]["avgPaceSec"] == 100
 assert c["summary"]["xpTotal"] == 500 and c["summary"]["xpFirstSession"] == 1
+# Newer stats (schema 3). Session 1 has no start level, so its levels are estimated.
+assert data["schemaVersion"] == 3
+assert c["levels"] == [{"level": 1, "sec": 150, "estimated": True}, {"level": 2, "sec": 250, "estimated": True},
+                       {"level": 3, "sec": 100, "estimated": True}], c["levels"]
+assert c["questColors"]["none"] == 2 and c["turnIns"]["unknown"] == 2
+assert c["summary"]["playedSec"] == 500 and c["summary"]["xpPerMinute"] == 75, c["summary"]
 print("export_site self-check passed")

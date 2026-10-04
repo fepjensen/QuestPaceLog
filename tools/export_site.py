@@ -1,4 +1,4 @@
-"""Builds the Lab page's data file (schemaVersion 2) from QuestPaceLog's saved data.
+"""Builds the Lab page's data file (schemaVersion 3, version 2 plus optional newer stats) from QuestPaceLog's saved data.
 
 Reads every QuestPaceLog*.lua under each character's SavedVariables folder,
 the live file and the dated backups, and merges their sessions by start
@@ -7,7 +7,7 @@ Only reads the WTF folder, never writes to it.
 
     python tools/export_site.py --out path/to/questpacelog.json [--until 2026-09-27]
 """
-import argparse, datetime, glob, json, os, re, sys
+import argparse, collections, datetime, glob, json, os, re, sys
 
 WTF = r"F:\World of Warcraft\_classic_beta_\WTF\Account"
 
@@ -122,10 +122,49 @@ def last_moment(s, quests_only=False):
     return max(times) if times else None
 
 
+def level_times(sessions):
+    """Seconds played at each level, the same way the addon's dashboard works it out.
+    Sessions from 1.8 on know their start level and level-ups. Older ones are
+    estimated from the levels quests and dungeons recorded, each level-up placed
+    halfway between the last moment at the old level and the first at the new one."""
+    out, est = collections.defaultdict(float), set()
+    for s in sessions:
+        start = s["startedAt"]
+        end = s.get("lastActiveAt") or last_moment(s) or start
+        if s.get("startLevel"):
+            t0, lvl = start, s["startLevel"]
+            for lu in as_list(s.get("levelUps")):
+                out[lvl] += max(0, lu["at"] - t0)
+                t0, lvl = lu["at"], lu["level"]
+            out[lvl] += max(0, end - t0)
+            continue
+        pts = []
+        for e in as_list(s.get("entries")):
+            pts += [(e["acceptedAt"], e["acceptedLevel"])] if e.get("acceptedAt") and e.get("acceptedLevel") else []
+            pts += [(e["turnedInAt"], e["turnedInLevel"])] if e.get("turnedInAt") and e.get("turnedInLevel") else []
+        for d in as_list(s.get("dungeons")):
+            pts += [(d["enteredAt"], d["enteredLevel"])] if d.get("enteredAt") and d.get("enteredLevel") else []
+            pts += [(d["leftAt"], d["leftLevel"])] if d.get("leftAt") and d.get("leftLevel") else []
+        if not pts:
+            continue
+        pts.sort()
+
+        def add(level, sec):
+            out[level] += max(0, sec)
+            est.add(level)
+        add(pts[0][1], pts[0][0] - start)
+        for (ta, la), (tb, lb) in zip(pts, pts[1:]):
+            mid = tb if la == lb else (ta + tb) / 2
+            add(la, mid - ta)
+            add(lb, tb - mid)
+        add(pts[-1][1], max(end, pts[-1][0]) - pts[-1][0])
+    return [{"level": lvl, "sec": round(out[lvl]), "estimated": lvl in est} for lvl in sorted(out)]
+
+
 def character(name, sessions):
     info = []
     for idx, s in enumerate(sessions, 1):
-        last = last_moment(s)
+        last = s.get("lastActiveAt") or last_moment(s)
         entries = as_list(s.get("entries"))
         info.append({
             "index": idx,
@@ -186,6 +225,11 @@ def character(name, sessions):
         })
 
     xp_sessions = [s for s in sessions if s.get("xpTotal") is not None]
+    played = sum(i["loggedSec"] or 0 for i in info)
+    xp_played = sum(i["loggedSec"] or 0 for i, s in zip(info, sessions) if s.get("xpTotal"))
+    turned_in = [e for s in sessions for e in as_list(s.get("entries")) if e.get("turnedInAt")]
+    colors = collections.Counter(e.get("colorAtTurnIn") or "none" for e in turned_in)
+    zones = collections.Counter(e["turnedInZone"] for e in turned_in if e.get("turnedInZone"))
     xp_total = sum(s["xpTotal"] for s in xp_sessions) if xp_sessions else None
     xp_quests = sum(s.get("xpFromQuests") or 0 for s in xp_sessions) if xp_sessions else None
     status_counts = {k: sum(1 for q in out_quests if q["status"] == k) for k in ("completed", "backlog", "inlog")}
@@ -205,7 +249,19 @@ def character(name, sessions):
             "xpFromQuests": xp_quests,
             "xpOther": (xp_total - xp_quests) if xp_sessions else None,
             "xpFirstSession": next((i["index"] for i in info if i["xp"] is not None), None),
+            "playedSec": played,
+            "xpPerMinute": round(xp_total / (xp_played / 60)) if xp_total and xp_played >= 60 else None,
         },
+        "questColors": {k: colors.get(k, 0) for k in ("red", "orange", "yellow", "green", "gray", "none")},
+        "turnIns": {
+            "solo": sum(1 for e in turned_in if e.get("turnedInGroupSize") == 1),
+            "grouped": sum(1 for e in turned_in if (e.get("turnedInGroupSize") or 0) > 1),
+            "unknown": sum(1 for e in turned_in if e.get("turnedInGroupSize") is None),
+        },
+        "groups": [{"session": idx, "durationSec": g.get("durationSec"), "maxSize": g.get("maxSize") or 2}
+                   for idx, s in enumerate(sessions, 1) for g in as_list(s.get("groups"))],
+        "levels": level_times(sessions),
+        "zones": [{"zone": z, "turnedIn": n} for z, n in zones.most_common(10)],
         "questStatus": status_counts,
         "questLength": [
             {"key": "under5", "count": sum(1 for p in paced if p < 300)},
@@ -214,7 +270,7 @@ def character(name, sessions):
         ],
         "sessions": info,
         "quests": out_quests,
-        "rests": [{"session": idx, "durationSec": r.get("durationSec"), "open": not r.get("endedAt")}
+        "rests": [{"session": idx, "durationSec": r.get("durationSec"), "open": not r.get("endedAt"), "campfire": bool(r.get("campfire"))}
                   for idx, s in enumerate(sessions, 1) for r in as_list(s.get("rests"))],
         "dungeons": [{"session": idx, "name": d.get("name") or "?", "difficulty": d.get("difficultyName") or None,
                       "durationSec": d.get("durationSec"), "kills": sum(1 for b in as_list(d.get("bosses")) if b.get("success")),
@@ -236,7 +292,7 @@ def main():
             chars.append(character(os.path.basename(os.path.dirname(folder)).split("-")[0], sessions))
     if not chars:
         sys.exit("No QuestPaceLog saved data found under " + args.wtf)
-    data = {"schemaVersion": 2, "tool": "questpacelog", "generatedOn": datetime.date.today().isoformat(),
+    data = {"schemaVersion": 3, "tool": "questpacelog", "generatedOn": datetime.date.today().isoformat(),
             "game": "WoW Forever beta", "characters": chars}
     with open(args.out, "w", encoding="utf-8", newline="\n") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
