@@ -12,6 +12,11 @@ QuestPaceLogDB = {
   sessions = { <session>, ... },     -- array, oldest first
   quests   = { [questID] = <quest record>, ... },   -- added in 1.1
   campBuffNames = { "boosted rest", ... },         -- added in 1.2, lowercase buff names watched as camp buffs
+  places   = { ["Zone / Subzone"] = { zone, subZone, firstAt, level }, ... },  -- 2.0, first time the addon saw you there
+  journal  = { [questID] = { title, text, objective, savedAt }, ... },          -- 2.0, quest text kept at accept
+  records  = { [key] = { value, at, label, session }, ... },                    -- 2.0, keys below
+  goal     = { level, by, byStr, setAt, setLevel } or nil,                     -- 2.0, from /qpl goal
+  settings = { cheer = true or false, lens = "achiever" or nil },               -- 2.0
 }
 ```
 
@@ -32,6 +37,13 @@ One per login. A /reload within six hours continues the same session.
 | groups | array of group | groups joined this session (1.3) |
 | startLevel | number or nil | player level when the session started. nil before 1.8 (1.8) |
 | levelUps | array of { level, at } or nil | each level reached this session and when, from PLAYER_LEVEL_UP. Absent until the first level-up, and before 1.8 (1.8) |
+| deaths | array of death or nil | each death this session (2.0) |
+| moneyGained, moneySpent | number (copper) or nil | positive and negative changes in your money this session (2.0) |
+| moneyFromQuests | number (copper) or nil | money from quest rewards this session, from QUEST_TURNED_IN (2.0) |
+| kills, killXP | number or nil | kills this session and their XP, from your own "X dies, you gain N experience" lines. What was killed isn't kept (2.0) |
+| honorKillsAtStart, honorKills | number or nil | lifetime honorable kills when the session began, and the gain since (2.0) |
+| discoveries | array of { at, name, xp, zone, level } or nil | the game's own "Discovered" messages, real first visits (2.0) |
+| flightPaths | array of { at, zone, subZone, level } or nil | the game's "New flight path discovered" message (2.0) |
 | lastActiveAt | number or nil | epoch seconds of the last event the addon saw this session, including logout. lastActiveAt minus startedAt is the time played. nil on sessions before 1.7, where the latest timestamp in the session is the best estimate (1.7) |
 
 ## Entry (one quest, within one session)
@@ -56,6 +68,8 @@ A quest accepted in one session and turned in during a later one appears as two 
 | durationSec | number or nil | turn-in minus accept, only when both are in this session |
 | backlog | true or nil | set by untracking the quest or by /qpl skip, cleared by tracking again or /qpl unskip |
 | reason | letter a to g or nil | optional note from /qpl why (1.1). Not used as evidence |
+| moneyReward | number (copper) or nil | money paid at turn-in (2.0) |
+| suggestedGroup | number or nil | the group size the quest log suggested, when more than 1 (2.0) |
 
 ## Quest record (1.1), one per questID, across sessions
 
@@ -73,12 +87,21 @@ A quest accepted in one session and turned in during a later one appears as two 
 | turnedInZone, turnedInSubZone, turnedInMapID | where, at turn-in (1.2) |
 | turnedInGroupSize | group size at turn-in, as on the entry (1.3) |
 | reason | copy of the entry's /qpl why letter |
+| zones | the zones the quest took you through while open, in order, starting where you accepted it (2.0) |
 
 Picking a quest back up after turning it in or dropping it starts a fresh record for that questID.
 
 ## Dungeon
 
-name, instanceType, difficultyName, enteredAt, enteredAtStr, enteredLevel, leftAt, leftAtStr, leftLevel, durationSec, bosses (array of { name, success (boolean), at }).
+name, instanceType, difficultyName, enteredAt, enteredAtStr, enteredLevel, leftAt, leftAtStr, leftLevel, durationSec, bosses (array of { name, success (boolean), at }). From 2.0 also groupSize, your group's size when you entered.
+
+## Death (2.0)
+
+at, atStr, level, zone, subZone, releasedAt when you released as a ghost, revivedAt when you were alive again, downSec (at to revivedAt), and ghostSec (releasedAt to revivedAt) when you released.
+
+## Records (2.0)
+
+questXPPerMin (best XP a minute on one quest, at least a minute long), sessionQuests (most turn-ins in one session), sessionXPPerMin (best XP a minute over a session of 15 minutes or more), sessionKills (most kills in one session). Each holds value, at, label and session (the session's startedAt).
 
 ## Rest
 

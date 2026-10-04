@@ -2,7 +2,7 @@
 
 ## What this is
 
-A small World of Warcraft addon for WoW Forever (Blizzard's 2026 Classic-style game, beta until October 21, 2026, launch November 4). It records Felips' own play on his own characters, when he accepts and turns in quests, the quest's level and color, experience earned, rest periods and dungeon visits. He uses the data as evidence in design criticism he publishes on his site, fjportfolio.com, and shows a trimmed summary of it in the site's Lab section.
+A small World of Warcraft addon for WoW Forever (Blizzard's 2026 Classic-style game, beta until October 21, 2026, launch November 4). It records Felips' own play on his own characters, when he accepts and turns in quests, the quest's level and color, experience earned, rest periods and dungeon visits. He uses the data as evidence in design criticism he publishes on his site, fjportfolio.com, and shows a trimmed summary of it in the site's Lab section. From 2.0 (2026-10-04) it is also a tracker for any player, with a dashboard lens for each of Bartle's four player types and motivating chat lines that can be turned off with /qpl cheer off.
 
 Felips is a lawyer building a career in game design criticism, not a programmer. Explain changes in plain language, say what to test in the game, and keep each change small.
 

@@ -145,6 +145,30 @@ window updates by itself when you turn in a quest while it's open. Its two butto
 session and all sessions together. You can select the text in it and copy
 it with Ctrl+C. /qpl report all prints the all-sessions report in chat.
 
+Version 2.0, something for each kind of player.
+Richard Bartle described four kinds of player, Achievers, Explorers,
+Socializers and Killers. The dashboard has a lens for each, plus an
+Overview and a Compass. You don't have to pick one. After 10 minutes of
+play the window opens on the lens your play leans to, marked "(you)" in
+gold, and the Compass shows why, with a dot on Bartle's own graph. Pick
+another lens and the window remembers your choice.
+
+Achiever. XP a minute, quests an hour, time to the next level (/qpl eta),
+your goal (/qpl goal 20, or /qpl goal 20 2026-10-12, /qpl goal clear),
+your records (/qpl records), and each level against the one before.
+Explorer. Places discovered and their XP, flight paths, places visited,
+and the quests that sent you farthest. /qpl journal and part of a quest
+name shows the text of a quest you accepted.
+Socializer. Time grouped, groups, group quests and dungeon runs by group
+size. Only how many people, never who.
+Competitor. Kills, kills an hour, XP from kills, deaths and time spent
+dead. Your rival is your own past, other players are never recorded.
+
+Beating a record, finishing a level or nearing your goal says so in chat.
+/qpl cheer off turns those lines off, /qpl cheer on brings them back. The
+Card button, or /qpl card, selects a short summary of your session in the
+window so you can copy it with Ctrl+C and post it yourself.
+
 Getting the report out.
 The report prints to your chat window, so you can select and copy it from
 there. The raw data is also written to your SavedVariables file,
@@ -158,7 +182,7 @@ watching.
 
 Known limitation.
 This uses QUEST_ACCEPTED, QUEST_TURNED_IN, QUEST_WATCH_LIST_CHANGED,
-PLAYER_XP_UPDATE, ENCOUNTER_END, PLAYER_UPDATE_RESTING, PLAYER_LEVEL_UP, UNIT_AURA (your own buffs only), and GROUP_ROSTER_UPDATE (group size only), plus the game's own quest log functions to read each quest's level. All of these
+PLAYER_XP_UPDATE, ENCOUNTER_END, PLAYER_UPDATE_RESTING, PLAYER_LEVEL_UP, UNIT_AURA (your own buffs only), GROUP_ROSTER_UPDATE (group size only), PLAYER_DEAD, PLAYER_ALIVE, PLAYER_UNGHOST, PLAYER_MONEY, the zone change events, QUEST_DETAIL, and your own XP and system messages, plus the game's own quest log functions to read each quest's level. All of these
 are long-standing, widely used events, the same ones dungeon and XP addons
 have relied on for years, but Forever is still in beta, so if any of them
 stops firing or fires with different data, the affected part will just go

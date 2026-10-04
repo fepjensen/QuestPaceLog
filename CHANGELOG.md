@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.0, 2026-10-04
+
+QuestPaceLog becomes a tracker for players, not only an evidence logger, with something for each of Bartle's four kinds of player. All of it is about your own character only.
+
+- Achievers. Personal records with a chat line when you beat one (`QuestPaceLogDB.records`, /qpl records). Goals, /qpl goal 20 or /qpl goal 20 2026-10-12 (`QuestPaceLogDB.goal`). Time to the next level at this session's pace, /qpl eta. Each level-up compares the level just finished with the one before.
+- Explorers. The game's own Discovered messages with their XP (`discoveries`), flight paths learned (`flightPaths`), every place you stand in (`QuestPaceLogDB.places`), the zones each open quest takes you through (`zones` on the quest record), and a quest journal with the text of quests you accept (`QuestPaceLogDB.journal`, /qpl journal [name]).
+- Socializers. Group quests (`suggestedGroup` on the entry), your group's size in each dungeon (`groupSize`), and time spent grouped. Only counts, never who.
+- Competitors. Kills and their XP from your own XP lines (`kills`, `killXP`), deaths with time dead and time as a ghost (`deaths`), and honorable kills (`honorKills`). The rival is your own past.
+- Gold gained, spent and from quest rewards (`moneyGained`, `moneySpent`, `moneyFromQuests`, `moneyReward` on the entry).
+- The dashboard has lenses, Overview, Achiever, Explorer, Socializer, Competitor and Compass. The Compass places your play on Bartle's own graph from what you did. Once you've played 10 minutes, the window opens on the lens your play leans to, marked "(you)". A lens you pick yourself is remembered instead (`settings.lens`). The scope button switches between this session and all sessions.
+- Card button and /qpl card, a short summary selected for you to copy and post yourself. Nothing is sent anywhere.
+- Records, level and goal messages can be turned off with /qpl cheer off (`settings.cheer`).
+- Duel results are left out on purpose, since the game only reports them in a line naming your opponent.
+- Not yet verified in the real Forever client. The message-based parts (discoveries, flight paths, kills) use the client's own message text, so they follow its language.
+
 ## 1.9, 2026-10-03
 
 - Fixed the donut titles and percentages, which were placed from the middle of the window instead of its top left, so they showed up near the bottom or off screen.

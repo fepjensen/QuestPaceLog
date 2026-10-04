@@ -29,6 +29,15 @@ local function newWorld(opts)
     _G.UnitBuff = function(_, i) return W.buffs[i] end
     W.group = 0
     _G.GetNumGroupMembers = function() return W.group end
+    W.money, W.ghost, W.hk = 1000, false, 0
+    _G.GetMoney = function() return W.money end
+    _G.UnitIsGhost = function() return W.ghost end
+    _G.GetPVPLifetimeStats = function() return W.hk end
+    W.detail = nil
+    _G.GetTitleText = function() return W.detail and W.detail.title end
+    _G.GetQuestText = function() return W.detail and W.detail.text end
+    _G.GetObjectiveText = function() return W.detail and W.detail.objective end
+    _G.IsInInstance = function() return false, "none" end
     _G.GetNumRaidMembers, _G.GetNumPartyMembers = nil, nil
     _G.C_UnitAuras = nil
     _G.GetQuestGreenRange = nil
@@ -51,7 +60,8 @@ local function newWorld(opts)
         f.IsShown = function(self) return self.shown end
         f.CreateFontString = function() return fakeFrame() end
         f.CreateTexture = function() return fakeFrame() end
-        return setmetatable(f, { __index = function() return function() end end })
+        -- Like a real frame, only methods (capitalized names) exist, other fields stay nil.
+        return setmetatable(f, { __index = function(_, k) if type(k) == "string" and k:match("^%u") then return function() end end end })
     end
     W.missingTemplates, W.texts, W.hovers = {}, {}, {}
     _G.CreateFrame = function(_, name, _, template)
@@ -415,10 +425,10 @@ end)
 test("/qpl show opens a window with the report, both views", function()
     local W = newWorld()
     twoSessions(W)
-    W.cmd("show")
+    W.cmd("show overview")
     assert(W.lastText and W.lastText:find("Quests logged, 1.", 1, true), "this session in the window")
     assert(not W.lastText:find("|c", 1, true), "color codes stripped")
-    W.cmd("show all")
+    W.cmd("show all overview")
     assert(W.lastText:find("Quests logged, 2.", 1, true), "all sessions in the window")
     eq(UISpecialFrames[1], "QuestPaceLogFrame", "Escape closes it")
 end)
@@ -427,7 +437,7 @@ test("the window still opens when the client lacks the templates", function()
     local W = newWorld()
     W.missingTemplates = { BasicFrameTemplateWithInset = true, UIPanelScrollFrameTemplate = true, UIPanelButtonTemplate = true, UIPanelCloseButton = true }
     twoSessions(W)
-    W.cmd("show")
+    W.cmd("show overview")
     assert(W.lastText and W.lastText:find("Quests logged, 1.", 1, true), "plain window shows the report")
     assert(not W.saw("couldn't open"), "no failure message")
 end)
@@ -443,17 +453,17 @@ end
 test("dashboard tiles and bars show the right numbers, and refresh on turn-in", function()
     local W = newWorld()
     twoSessions(W)
-    W.cmd("show all")
+    W.cmd("show all overview")
     assert(not W.saw("couldn't draw"), "visuals drew without an error")
     assert(W.texts["2"], "quests turned in tile")
     assert(W.texts["3:00"], "average per quest tile")
     assert(shown(W, "2 yellow"), "quest color legend")
     assert(shown(W, "100%"), "donut center")
     QuestPaceLogDB.sessions[1].entries[1].colorAtTurnIn = nil
-    W.cmd("show all")
+    W.cmd("show all overview")
     assert(shown(W, "1 yellow\n1 not recorded"), "turn-ins from before colors were recorded")
     assert(W.texts["Second Day"] and W.texts["4:00, 25 XP a minute"], "recent quest row with XP a minute")
-    W.cmd("show")
+    W.cmd("show overview")
     W.texts = {}
     W.addQuest(902, "Third Quest", 8)
     W.fire("QUEST_ACCEPTED", 902)
@@ -466,6 +476,7 @@ end)
 test("the book button opens and closes the dashboard", function()
     local W = newWorld()
     twoSessions(W)
+    QuestPaceLogDB.settings = { lens = "overview" }
     local b = _G.QuestPaceLogButton
     assert(b and b.OnClick, "button exists")
     b.OnClick()
@@ -483,7 +494,7 @@ test("XP per minute and time played, live and after logout", function()
     eq(QuestPaceLogDB.sessions[1].lastActiveAt, W.clock, "last active saved at logout")
     W.cmd("report")
     assert(W.saw("XP per minute played, 300."), "300 XP a minute over 10 minutes")
-    W.cmd("show")
+    W.cmd("show overview")
     assert(W.texts["300"] and W.texts["10:00"], "XP a minute and time played tiles")
 end)
 
@@ -508,7 +519,7 @@ test("time played at each level, from the start level through level-ups", functi
     eq(QuestPaceLogDB.sessions[1].levelUps[1].level, 9, "level-up saved")
     W.cmd("report")
     assert(W.saw("Time played at each level, level 8 10:00, level 9 5:00. Estimated"), "level times in the report")
-    W.cmd("show")
+    W.cmd("show overview")
     assert(W.texts["10m"] and W.texts["5m"], "level columns in the window")
 end)
 
@@ -520,7 +531,7 @@ test("hovering a recent quest shows its details", function()
         AddLine = function(_, t) table.insert(lines, t) end,
     }, { __index = function() return function() end end })
     twoSessions(W)
-    W.cmd("show")
+    W.cmd("show overview")
     -- OnEnter scripts in creation order. The book button comes first, then
     -- the eight quest rows, and this session's one quest sits in row 1.
     eq(#W.hovers, 9, "button plus eight hover strips")
@@ -536,7 +547,7 @@ test("the window is never taller than the screen", function()
     local W = newWorld()
     _G.UIParent = { GetHeight = function() return 700 end }
     twoSessions(W)
-    W.cmd("show")
+    W.cmd("show overview")
     eq(W.windowHeight, 680, "clamped to the screen")
     _G.UIParent = nil
 end)
@@ -551,6 +562,198 @@ test("sessions before 1.8 estimate time per level from quest levels", function()
     W.cmd("report all")
     -- Level 5 from the start through 1300 and on to the midpoint 1400, level 6 from there to 1600.
     assert(W.saw("level 5 6:40 (estimated), level 6 3:20 (estimated)"), "estimated level times")
+end)
+
+-- 2.0, something for each kind of player.
+
+test("deaths record time dead and time as a ghost", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.fire("PLAYER_DEAD")
+    W.clock = W.clock + 30
+    W.ghost = true
+    W.fire("PLAYER_ALIVE")
+    W.clock = W.clock + 90
+    W.ghost = false
+    W.fire("PLAYER_UNGHOST")
+    local d = QuestPaceLogDB.sessions[1].deaths[1]
+    eq(d.zone, "Tirisfal Glades", "where you died")
+    eq(d.downSec, 120, "time dead")
+    eq(d.ghostSec, 90, "time as a ghost")
+    assert(W.saw("Back on your feet after 2:00, 1:30 of it as a ghost."), "chat line")
+end)
+
+test("gold gained, spent and from quests", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.money = 1500
+    W.fire("PLAYER_MONEY")
+    W.money = 1200
+    W.fire("PLAYER_MONEY")
+    W.addQuest(950, "Paid Quest", 8)
+    W.fire("QUEST_ACCEPTED", 950)
+    W.removeQuest(950)
+    W.fire("QUEST_TURNED_IN", 950, 100, 250)
+    local s = QuestPaceLogDB.sessions[1]
+    eq(s.moneyGained, 500, "gained")
+    eq(s.moneySpent, 300, "spent")
+    eq(s.moneyFromQuests, 250, "from quest rewards")
+    eq(s.entries[1].moneyReward, 250, "on the entry")
+end)
+
+test("kills counted from your own XP lines, nothing about the target kept", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.fire("CHAT_MSG_COMBAT_XP_GAIN", "Rattlecage Skeleton dies, you gain 120 experience. (+60 exp Rested bonus)")
+    W.fire("CHAT_MSG_COMBAT_XP_GAIN", "You gain 50 experience.")
+    local s = QuestPaceLogDB.sessions[1]
+    eq(s.kills, 1, "one kill, the plain XP line isn't one")
+    eq(s.killXP, 120, "kill XP")
+    for k, v in pairs(s) do assert(v ~= "Rattlecage Skeleton", "target name not saved") end
+end)
+
+test("discoveries and flight paths from the game's own lines, counted once", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.fire("CHAT_MSG_SYSTEM", "Discovered Agamand Mills: 70 experience gained")
+    W.fire("UI_INFO_MESSAGE", 0, "Discovered Agamand Mills: 70 experience gained")
+    W.fire("UI_INFO_MESSAGE", "New flight path discovered!")
+    local s = QuestPaceLogDB.sessions[1]
+    eq(#s.discoveries, 1, "same line twice counts once")
+    eq(s.discoveries[1].name, "Agamand Mills", "place name")
+    eq(s.discoveries[1].xp, 70, "discovery XP")
+    eq(#s.flightPaths, 1, "flight path")
+    W.cmd("report")
+    assert(W.saw("Places discovered this session, 1, worth 70 XP. Flight paths learned, 1."), "report line")
+end)
+
+test("places and the zones each open quest takes you through", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(960, "Long Walk", 8)
+    W.fire("QUEST_ACCEPTED", 960)
+    W.zone, W.subZone = "Undercity", "Trade Quarter"
+    W.fire("ZONE_CHANGED_NEW_AREA")
+    W.zone, W.subZone = "Silverpine Forest", "The Sepulcher"
+    W.fire("ZONE_CHANGED_NEW_AREA")
+    W.fire("ZONE_CHANGED_NEW_AREA")
+    eq(table.concat(QuestPaceLogDB.quests[960].zones, ", "), "Tirisfal Glades, Undercity, Silverpine Forest", "travel")
+    assert(QuestPaceLogDB.places["Undercity / Trade Quarter"], "place noted")
+end)
+
+test("the quest journal keeps the text of quests you accept", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.detail = { title = "Story Quest", text = "The dead walk again.", objective = "Kill 8 zombies." }
+    W.fire("QUEST_DETAIL")
+    W.addQuest(970, "Story Quest", 8)
+    W.fire("QUEST_ACCEPTED", 970)
+    eq(QuestPaceLogDB.journal[970].text, "The dead walk again.", "text saved")
+    W.cmd("journal story")
+    assert(W.saw("Story Quest. The dead walk again. Objective, Kill 8 zombies."), "journal command")
+end)
+
+test("records cheer when beaten in a later session, and cheer can be turned off", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(980, "Quick", 8)
+    W.fire("QUEST_ACCEPTED", 980)
+    W.clock = W.clock + 120
+    W.removeQuest(980)
+    W.fire("QUEST_TURNED_IN", 980, 200, 0)
+    eq(QuestPaceLogDB.records.questXPPerMin.value, 100, "first record kept quietly")
+    assert(not W.saw("New record"), "no cheer for the very first record")
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(981, "Quicker", 8)
+    W.fire("QUEST_ACCEPTED", 981)
+    W.clock = W.clock + 60
+    W.removeQuest(981)
+    W.fire("QUEST_TURNED_IN", 981, 300, 0)
+    assert(W.saw("New record, best XP a minute on one quest, 300 on Quicker."), "cheer on a beaten record")
+    W.cmd("cheer off")
+    eq(QuestPaceLogDB.settings.cheer, false, "cheer off saved")
+end)
+
+test("level-ups compare against the level before, and goals count down", function()
+    local W = newWorld({ level = 8 })
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.cmd("goal 12")
+    eq(QuestPaceLogDB.goal.level, 12, "goal saved")
+    W.clock = W.clock + 60
+    W.level = 9; W.fire("PLAYER_LEVEL_UP", 9)
+    W.clock = W.clock + 600
+    W.level = 10; W.fire("PLAYER_LEVEL_UP", 10)
+    W.clock = W.clock + 300
+    W.level = 11; W.fire("PLAYER_LEVEL_UP", 11)
+    assert(W.saw("Level 9 took 10:00."), "first full level")
+    assert(W.saw("Level 10 took 5:00, 50% faster than level 9."), "against the level before")
+    assert(W.saw("1 level to your goal of level 12."), "goal countdown")
+    W.cmd("goal 20 2026-10-12")
+    eq(QuestPaceLogDB.goal.byStr, "2026-10-12", "goal date")
+end)
+
+test("time to the next level from this session's pace", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.clock = W.clock + 600
+    QuestPaceLogDB.sessions[1].xpTotal = 900 -- 90 XP a minute, 900 of 1000 left at 100 XP
+    W.cmd("eta")
+    assert(W.saw("At this session's pace, level 9 in about 10:00 of play."), "ETA")
+end)
+
+test("group quests and dungeon group size are noted", function()
+    local W = newWorld()
+    _G.C_QuestLog.GetInfo = function(i)
+        if i == 1 then return { isHeader = true } end
+        local id = W.order[i - 1]
+        return id and { questID = id, title = W.log[id].title, level = W.log[id].level, suggestedGroup = 3 }
+    end
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(990, "Elite Quest", 8)
+    W.fire("QUEST_ACCEPTED", 990)
+    eq(QuestPaceLogDB.sessions[1].entries[1].suggestedGroup, 3, "suggested group size")
+    W.group = 4
+    _G.IsInInstance = function() return true, "party" end
+    _G.GetInstanceInfo = function() return "Scarlet Monastery", "party", 1, "Normal" end
+    W.fire("PLAYER_ENTERING_WORLD", false, false)
+    eq(QuestPaceLogDB.sessions[1].dungeons[1].groupSize, 4, "group size in the dungeon")
+end)
+
+test("honorable kills since the session began", function()
+    local W = newWorld()
+    W.hk = 10
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.hk = 13
+    W.fire("PLAYER_PVP_KILLS_CHANGED")
+    eq(QuestPaceLogDB.sessions[1].honorKills, 3, "three this session")
+end)
+
+test("the card is a short summary to copy, nothing is sent", function()
+    local W = newWorld()
+    twoSessions(W)
+    W.cmd("card")
+    assert(shown(W, "QuestPaceLog, session of") and shown(W, "1 quests turned in"), "card text in the window")
+end)
+
+test("every lens draws, and the window opens on the lens your play leans to", function()
+    local W = newWorld()
+    twoSessions(W)
+    W.fire("CHAT_MSG_COMBAT_XP_GAIN", "Wolf dies, you gain 10 experience.")
+    W.clock = W.clock + 900 -- the Compass needs 10 minutes of play
+    for _, lens in ipairs({ "achiever", "explorer", "socializer", "competitor", "compass" }) do
+        W.cmd("show all " .. lens)
+        W.cmd("show " .. lens)
+    end
+    assert(not W.saw("couldn't draw"), "every lens drew without an error")
+    assert(shown(W, "you play most like"), "compass tile")
+    assert(shown(W, "Achiever (you)"), "dominant lens marked")
+    eq(QuestPaceLogDB.settings.lens, nil, "no choice saved from commands")
+    -- A fresh window with no saved choice opens on the Compass's pick.
+    local W2 = newWorld({ db = QuestPaceLogDB })
+    W2.fire("PLAYER_ENTERING_WORLD", false, true)
+    W2.clock = W.clock
+    W2.cmd("show")
+    eq(_G.QuestPaceLogFrame.lens, "achiever", "opens on the dominant lens")
 end)
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))

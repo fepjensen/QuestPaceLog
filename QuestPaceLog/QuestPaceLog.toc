@@ -1,8 +1,8 @@
 ## Interface: 16001
 ## Title: Quest Pace Log
-## Notes: Timestamps the exact moment a quest is accepted and turned in, and prints a pacing report.
+## Notes: Tracks your quests, leveling, discoveries, groups and deaths, with a dashboard for each kind of player.
 ## Author: Felipe Jensen
-## Version: 1.9
+## Version: 2.0
 ## SavedVariablesPerCharacter: QuestPaceLogDB
 
 QuestPaceLog.lua

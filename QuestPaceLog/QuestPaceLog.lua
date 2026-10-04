@@ -239,7 +239,7 @@ local function ReadQuestLog()
         for i = 1, n do
             local info = C_QuestLog.GetInfo(i)
             if info and not info.isHeader and info.questID then
-                out[info.questID] = { title = info.title, level = info.level }
+                out[info.questID] = { title = info.title, level = info.level, suggestedGroup = info.suggestedGroup }
             end
         end
         return out
@@ -247,9 +247,9 @@ local function ReadQuestLog()
     if GetNumQuestLogEntries and GetQuestLogTitle then
         local n = GetNumQuestLogEntries() or 0
         for i = 1, n do
-            local title, level, _, isHeader, _, _, _, questID = GetQuestLogTitle(i)
+            local title, level, suggestedGroup, isHeader, _, _, _, questID = GetQuestLogTitle(i)
             if title and not isHeader and questID then
-                out[questID] = { title = title, level = level }
+                out[questID] = { title = title, level = level, suggestedGroup = tonumber(suggestedGroup) }
             end
         end
     end
@@ -581,6 +581,344 @@ end
 local window -- the /qpl show dashboard, built on first use
 local PlayedSec, XPPerMinute, LevelTimes
 
+-- 2.0, something for each of Bartle's four kinds of player, all from your
+-- own character. Achievers get records, goals and time to the next level.
+-- Explorers get discoveries, places, flight paths, a quest journal and the
+-- zones each quest sent you through. Socializers get group time and dungeon
+-- runs by group size, counted, never named. Competitors get kills, deaths,
+-- time spent dead and honorable kills, measured against your own past.
+
+-- Settings. cheer turns the motivating chat lines (records, time to the next
+-- level, goals) on and off. On unless you turn it off.
+local function Settings()
+    QuestPaceLogDB.settings = QuestPaceLogDB.settings or {}
+    if QuestPaceLogDB.settings.cheer == nil then QuestPaceLogDB.settings.cheer = true end
+    return QuestPaceLogDB.settings
+end
+
+local function Cheer(msg)
+    if Settings().cheer then print("|cffffd200[QuestPaceLog]|r " .. msg) end
+end
+
+local function MinSec(sec)
+    sec = math.floor(sec + 0.5)
+    if sec >= 3600 then return string.format("%d:%02d:%02d", math.floor(sec / 3600), math.floor(sec % 3600 / 60), sec % 60) end
+    return string.format("%d:%02d", math.floor(sec / 60), sec % 60)
+end
+
+-- Turns one of the client's own message formats, like "Discovered %s: %d
+-- experience gained", into a pattern that captures its values, so these work
+-- in whatever language the client runs. The English text is the fallback.
+local function FormatPattern(fmt)
+    fmt = fmt:gsub("%%%d%$", "%%")
+    local p = fmt:gsub("([%(%)%.%+%-%*%?%[%]%^%$])", "%%%1")
+    p = p:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)")
+    return "^" .. p
+end
+
+-- Deaths. PLAYER_DEAD when you die, PLAYER_ALIVE when you release (as a
+-- ghost) or are brought back, PLAYER_UNGHOST when the ghost reaches the body.
+local function OpenDeath()
+    local d = session.deaths and session.deaths[#session.deaths]
+    return (d and not d.revivedAt) and d or nil
+end
+
+local function OnDeath()
+    session.deaths = session.deaths or {}
+    local zone, sub = CurrentZone()
+    local now = time()
+    table.insert(session.deaths, { at = now, atStr = date("%H:%M:%S", now), level = UnitLevel("player"), zone = zone, subZone = sub })
+    print("|cff33ff99[QuestPaceLog]|r You died" .. (ZoneLabel(zone, sub) and (" in " .. ZoneLabel(zone, sub)) or "") .. ".")
+end
+
+local function OnAlive(event)
+    local d = OpenDeath()
+    if not d then return end
+    local now = time()
+    if event == "PLAYER_ALIVE" and UnitIsGhost and UnitIsGhost("player") then
+        d.releasedAt = d.releasedAt or now
+        return
+    end
+    d.revivedAt, d.downSec = now, now - d.at
+    if d.releasedAt then d.ghostSec = now - d.releasedAt end
+    print(string.format("|cff33ff99[QuestPaceLog]|r Back on your feet after %s%s.", MinSec(d.downSec),
+        d.ghostSec and string.format(", %s of it as a ghost", MinSec(d.ghostSec)) or ""))
+end
+
+-- Gold. Every change in your own money, split into gained and spent, with
+-- quest rewards counted on their own from the turn-in.
+local lastMoney
+
+local function SyncMoney(snapshotOnly)
+    if not GetMoney then return end
+    local ok, m = pcall(GetMoney)
+    if not ok or type(m) ~= "number" then return end
+    if lastMoney and not snapshotOnly then
+        local delta = m - lastMoney
+        if delta > 0 then session.moneyGained = (session.moneyGained or 0) + delta end
+        if delta < 0 then session.moneySpent = (session.moneySpent or 0) - delta end
+    end
+    lastMoney = m
+end
+
+local function Gold(copper)
+    copper = math.floor(copper or 0)
+    local g, s, c = math.floor(copper / 10000), math.floor(copper % 10000 / 100), copper % 100
+    if g > 0 then return string.format("%dg %ds", g, s) end
+    if s > 0 then return string.format("%ds %dc", s, c) end
+    return c .. "c"
+end
+
+-- Kills. The game's own "X dies, you gain N experience" line about you. Only
+-- the count and the XP are kept, never what was killed.
+local KILL_PATTERN = FormatPattern(COMBATLOG_XPGAIN_FIRSTPERSON or "%s dies, you gain %d experience.")
+
+local function OnXPMessage(msg)
+    local _, xp = (msg or ""):match(KILL_PATTERN)
+    if not xp then return end
+    session.kills = (session.kills or 0) + 1
+    session.killXP = (session.killXP or 0) + tonumber(xp)
+end
+
+-- Honorable kills, from your own lifetime PvP total, as the change since the session began.
+local function HonorKills()
+    if not GetPVPLifetimeStats then return nil end
+    local ok, hk = pcall(GetPVPLifetimeStats)
+    if ok and type(hk) == "number" then return hk end
+    return nil
+end
+
+local function SyncHonor()
+    local hk = HonorKills()
+    if not hk then return end
+    if session.honorKillsAtStart == nil then session.honorKillsAtStart = hk end
+    session.honorKills = hk - session.honorKillsAtStart
+end
+
+-- Places. Every zone and subzone you stand in, the first time this addon saw
+-- you there. Discoveries are the game's own "Discovered" lines, the real
+-- first visits, with the XP they paid. Flight paths are the game's "New
+-- flight path discovered" line.
+local function NotePlace()
+    local zone, sub = CurrentZone()
+    if not zone then return end
+    QuestPaceLogDB.places = QuestPaceLogDB.places or {}
+    local key = zone .. " / " .. (sub or zone)
+    if not QuestPaceLogDB.places[key] then
+        QuestPaceLogDB.places[key] = { zone = zone, subZone = sub, firstAt = time(), level = UnitLevel("player") }
+    end
+end
+
+local DISCOVERED_XP = FormatPattern(ERR_ZONE_EXPLORED_XP or "Discovered %s: %d experience gained")
+local DISCOVERED = FormatPattern(ERR_ZONE_EXPLORED or "Discovered: %s")
+local NEW_FLIGHT_PATH = ERR_NEWTAXIPATH or "New flight path discovered!"
+local lastNotice, lastNoticeAt = nil, 0
+
+-- The same line can arrive as a system chat message and as an on-screen
+-- notice, so one seen in the last few seconds is skipped.
+local function OnGameNotice(msg)
+    if type(msg) ~= "string" then return end
+    local now = time()
+    if msg == lastNotice and now - lastNoticeAt < 5 then return end
+    local zone, sub = CurrentZone()
+    local name, xp = msg:match(DISCOVERED_XP)
+    if not name then name = msg:match(DISCOVERED) end
+    if name then
+        lastNotice, lastNoticeAt = msg, now
+        session.discoveries = session.discoveries or {}
+        table.insert(session.discoveries, { at = now, name = name, xp = tonumber(xp), zone = zone, level = UnitLevel("player") })
+        return
+    end
+    if msg == NEW_FLIGHT_PATH then
+        lastNotice, lastNoticeAt = msg, now
+        session.flightPaths = session.flightPaths or {}
+        table.insert(session.flightPaths, { at = now, zone = zone, subZone = sub, level = UnitLevel("player") })
+        Cheer("New flight path" .. (ZoneLabel(zone, sub) and (", " .. ZoneLabel(zone, sub)) or "") .. ".")
+    end
+end
+
+-- Travel. The zones each open quest has taken you through, in order, starting
+-- where you accepted it.
+local function NoteTravel()
+    local zone = CurrentZone()
+    if not zone then return end
+    for _, rec in pairs(QuestTracker()) do
+        if rec.acceptedAt and not rec.turnedInAt and not rec.droppedAt then
+            rec.zones = rec.zones or { rec.acceptedZone }
+            local seen = false
+            for _, z in ipairs(rec.zones) do if z == zone then seen = true end end
+            if not seen then table.insert(rec.zones, zone) end
+        end
+    end
+end
+
+-- Quest journal. The quest's own text, kept when you accept it, so you have
+-- the story you actually read. QUEST_DETAIL shows the text, QUEST_ACCEPTED
+-- follows if you take the quest.
+local pendingDetail
+
+local function OnQuestDetail()
+    if not (GetTitleText and GetQuestText) then return end
+    local ok, title, text, objective = pcall(function() return GetTitleText(), GetQuestText(), GetObjectiveText and GetObjectiveText() end)
+    if ok and title then pendingDetail = { title = title, text = text, objective = objective, at = time() } end
+end
+
+local function SaveJournal(questID, title)
+    if not pendingDetail or pendingDetail.title ~= title or time() - pendingDetail.at > 600 then return end
+    QuestPaceLogDB.journal = QuestPaceLogDB.journal or {}
+    QuestPaceLogDB.journal[questID] = { title = title, text = pendingDetail.text, objective = pendingDetail.objective, savedAt = time() }
+    pendingDetail = nil
+end
+
+-- Records, your own bests. Each is { value, at, label }, and beating one says
+-- so in chat when cheer is on.
+local function Records()
+    QuestPaceLogDB.records = QuestPaceLogDB.records or {}
+    return QuestPaceLogDB.records
+end
+
+local RECORD_NAMES = {
+    questXPPerMin = "best XP a minute on one quest",
+    sessionQuests = "most quests turned in in one session",
+    sessionXPPerMin = "best XP a minute over a session",
+    sessionKills = "most kills in one session",
+}
+
+local function TryRecord(key, value, label)
+    if not value then return end
+    local r = Records()[key]
+    if r and value <= r.value then return end
+    local firstThisSession = not r or r.session ~= session.startedAt
+    Records()[key] = { value = value, at = time(), label = label, session = session.startedAt }
+    if r and firstThisSession then
+        Cheer(string.format("New record, %s, %s.", RECORD_NAMES[key], label or tostring(math.floor(value))))
+    end
+end
+
+local function SessionTurnIns(s)
+    local n = 0
+    for _, e in ipairs(s.entries or {}) do if e.turnedInAt then n = n + 1 end end
+    return n
+end
+
+local function CheckRecords(entry)
+    if entry and entry.durationSec and entry.durationSec >= 60 and (entry.xpReward or 0) > 0 then
+        local rate = entry.xpReward / (entry.durationSec / 60)
+        TryRecord("questXPPerMin", math.floor(rate + 0.5), string.format("%d on %s", math.floor(rate + 0.5), entry.title or "?"))
+    end
+    local n = SessionTurnIns(session)
+    if n > 0 then TryRecord("sessionQuests", n, tostring(n)) end
+    if (session.kills or 0) > 0 then TryRecord("sessionKills", session.kills, tostring(session.kills)) end
+    if PlayedSec(session) >= 15 * 60 then
+        local rate = XPPerMinute(session)
+        if rate then TryRecord("sessionXPPerMin", math.floor(rate + 0.5), tostring(math.floor(rate + 0.5))) end
+    end
+end
+
+-- Time to the next level, from this session's XP a minute.
+local function LevelETA()
+    local rate = XPPerMinute(session)
+    local xp, max = UnitXP("player"), UnitXPMax("player")
+    if not rate or rate <= 0 or not max or max <= 0 then return nil end
+    return (max - xp) / rate * 60
+end
+
+-- Your own levels, each against the one before. Only levels reached and left
+-- inside one session count, since only those have an exact length.
+local function LevelHistory()
+    local out = {}
+    for _, s in ipairs(QuestPaceLogDB.sessions or {}) do
+        local ups = s.levelUps or {}
+        for i = 2, #ups do
+            table.insert(out, { level = ups[i - 1].level, sec = ups[i].at - ups[i - 1].at })
+        end
+    end
+    return out
+end
+
+-- Goal. /qpl goal 20, or /qpl goal 20 2026-10-12 for a date. Kept in
+-- QuestPaceLogDB.goal, one at a time.
+local function GoalPace()
+    local g = QuestPaceLogDB.goal
+    if not g then return nil end
+    local level = UnitLevel("player")
+    if level >= g.level then return { done = true, left = 0 } end
+    -- ponytail: levels left times your recent average level length. Later
+    -- levels take longer, so this runs optimistic. A per-level XP table would fix it.
+    local recent, total = LevelHistory(), 0
+    local n = math.min(3, #recent)
+    for i = #recent - n + 1, #recent do total = total + recent[i].sec end
+    local perLevel = n > 0 and total / n or nil
+    local eta = LevelETA()
+    local playLeft = perLevel and eta and (eta + (g.level - level - 1) * perLevel) or nil
+    return { done = false, left = g.level - level, playLeft = playLeft }
+end
+
+local function SetGoal(rest)
+    local lvl, y, m, d = rest:match("^(%d+)%s*(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    lvl = lvl or rest:match("^(%d+)$")
+    if rest == "clear" then
+        QuestPaceLogDB.goal = nil
+        print("|cff33ff99[QuestPaceLog]|r Goal cleared.")
+        return
+    end
+    if not lvl then
+        local g = QuestPaceLogDB.goal
+        print("|cff33ff99[QuestPaceLog]|r " .. (g and string.format("Goal, level %d%s.", g.level, g.byStr and (" by " .. g.byStr) or "") or "No goal set.")
+            .. " Use /qpl goal 20, /qpl goal 20 2026-10-12, or /qpl goal clear.")
+        return
+    end
+    local by
+    if y then
+        local ok, t = pcall(time, { year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 23, min = 59, sec = 59 })
+        if ok then by = t end
+    end
+    QuestPaceLogDB.goal = { level = tonumber(lvl), by = by, byStr = by and string.format("%s-%s-%s", y, m, d) or nil, setAt = time(), setLevel = UnitLevel("player") }
+    print(string.format("|cff33ff99[QuestPaceLog]|r Goal set, level %s%s.", lvl, by and (" by " .. QuestPaceLogDB.goal.byStr) or ""))
+end
+
+-- What a level-up says when cheer is on. Your new level against the one
+-- before, the time to the next, and the goal.
+local function CheerLevelUp(newLevel)
+    local hist = LevelHistory()
+    local last, prev = hist[#hist], hist[#hist - 1]
+    if last and last.level == newLevel - 1 then
+        local compare = ""
+        if prev and prev.level == newLevel - 2 and prev.sec > 0 then
+            local change = (last.sec - prev.sec) / prev.sec * 100
+            compare = string.format(", %d%% %s than level %d", math.abs(math.floor(change + 0.5)), change <= 0 and "faster" or "slower", prev.level)
+        end
+        Cheer(string.format("Level %d took %s%s.", last.level, MinSec(last.sec), compare))
+    end
+    local g = GoalPace()
+    if g and g.done then
+        Cheer(string.format("Goal reached, level %d.", QuestPaceLogDB.goal.level))
+    elseif g then
+        Cheer(string.format("%d %s to your goal of level %d.", g.left, g.left == 1 and "level" or "levels", QuestPaceLogDB.goal.level))
+    end
+end
+
+-- A short summary you can copy and post yourself. Nothing is sent anywhere.
+local function CardText(s, allTime)
+    if not s then return "" end
+    local turned = SessionTurnIns(s)
+    local deaths = #(s.deaths or {})
+    local rate = XPPerMinute(s)
+    local lines = {
+        string.format("QuestPaceLog, %s", allTime and ("all sessions since " .. (s.startedAtStr or "?"):sub(1, 10)) or ("session of " .. (s.startedAtStr or "?"):sub(1, 10))),
+        string.format("Level %d, %d quests turned in%s, played %s", UnitLevel("player"), turned,
+            rate and string.format(", %d XP a minute", math.floor(rate + 0.5)) or "", MinSec(s.playedSec or PlayedSec(s) or 0)),
+    }
+    local extras = {}
+    if (s.kills or 0) > 0 then table.insert(extras, s.kills .. " kills") end
+    if deaths > 0 then table.insert(extras, deaths .. (deaths == 1 and " death" or " deaths")) end
+    if #(s.discoveries or {}) > 0 then table.insert(extras, #s.discoveries .. " places discovered") end
+    if (s.moneyGained or 0) > 0 then table.insert(extras, Gold(s.moneyGained) .. " earned") end
+    if #extras > 0 then table.insert(lines, table.concat(extras, ", ")) end
+    return table.concat(lines, ". ") .. "."
+end
+
+
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("QUEST_ACCEPTED")
@@ -594,7 +932,9 @@ frame:RegisterEvent("UNIT_AURA")
 frame:RegisterEvent("PLAYER_LOGOUT")
 -- GROUP_ROSTER_UPDATE on newer clients, the other two on older Classic ones.
 -- Registering an event a client doesn't know raises an error, hence pcall.
-for _, ev in ipairs({ "GROUP_ROSTER_UPDATE", "PARTY_MEMBERS_CHANGED", "RAID_ROSTER_UPDATE" }) do
+for _, ev in ipairs({ "GROUP_ROSTER_UPDATE", "PARTY_MEMBERS_CHANGED", "RAID_ROSTER_UPDATE",
+    "PLAYER_DEAD", "PLAYER_ALIVE", "PLAYER_UNGHOST", "PLAYER_MONEY", "CHAT_MSG_COMBAT_XP_GAIN", "PLAYER_PVP_KILLS_CHANGED",
+    "CHAT_MSG_SYSTEM", "UI_INFO_MESSAGE", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_AREA", "QUEST_DETAIL" }) do
     pcall(frame.RegisterEvent, frame, ev)
 end
 
@@ -621,6 +961,12 @@ frame:SetScript("OnEvent", function(self, event, ...)
             SyncCampBuffs(true)
         end
         SyncGroupState(isInitialLogin or isReloadingUi)
+        local od = CurrentOpenDungeon()
+        if od and not od.groupSize then od.groupSize = GroupSize() end
+        if isInitialLogin or isReloadingUi then SyncMoney(true) end
+        SyncHonor()
+        NotePlace()
+        NoteTravel()
         return
     end
 
@@ -659,6 +1005,10 @@ frame:SetScript("OnEvent", function(self, event, ...)
         entry.acceptedZone, entry.acceptedSubZone, entry.acceptedMapID = CurrentZone()
         rec.acceptedZone, rec.acceptedSubZone, rec.acceptedMapID = entry.acceptedZone, entry.acceptedSubZone, entry.acceptedMapID
         entry.colorAtAccept = DifficultyOf(entry.questLevel, level)
+        local logged = ReadQuestLog()[questID]
+        if logged and (logged.suggestedGroup or 0) > 1 then entry.suggestedGroup = logged.suggestedGroup end
+        rec.zones = { entry.acceptedZone }
+        SaveJournal(questID, title)
         local where = ZoneLabel(entry.acceptedZone, entry.acceptedSubZone)
         print(string.format("|cff33ff99[QuestPaceLog]|r %s accepted \"%s\" at level %d%s%s", entry.acceptedElapsed, title, level,
             where and (" in " .. where) or "",
@@ -703,6 +1053,11 @@ frame:SetScript("OnEvent", function(self, event, ...)
         if xpReward and xpReward > 0 then
             session.xpFromQuests = (session.xpFromQuests or 0) + xpReward
         end
+        if moneyReward and moneyReward > 0 then
+            entry.moneyReward = moneyReward
+            session.moneyFromQuests = (session.moneyFromQuests or 0) + moneyReward
+        end
+        CheckRecords(entry)
         local suffix = ""
         if entry.durationSec then
             suffix = string.format(" (took %d:%02d)", math.floor(entry.durationSec / 60), entry.durationSec % 60)
@@ -718,7 +1073,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         print(string.format("|cff33ff99[QuestPaceLog]|r %s turned in \"%s\"%s%s%s%s%s", entry.turnedInElapsed, entry.title, suffix, xpNote, levelNote,
             turnWhere and (" in " .. turnWhere) or "",
             entry.turnedInGroupSize > 1 and string.format(", in a group of %d", entry.turnedInGroupSize) or ""))
-        if window and window:IsShown() then pcall(window.Show_, window.allTime) end
+        if window and window:IsShown() then pcall(window.Show_, window.allTime, window.lens) end
 
     elseif event == "QUEST_WATCH_LIST_CHANGED" then
         -- Fires whenever a quest is added to or removed from your on-screen
@@ -778,6 +1133,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         session.levelUps = session.levelUps or {}
         table.insert(session.levelUps, { level = newLevel, at = time() })
         ScanQuestDifficulty(newLevel)
+        CheerLevelUp(newLevel)
 
     elseif event == "UNIT_AURA" then
         local unit = ...
@@ -785,6 +1141,28 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
     elseif event == "GROUP_ROSTER_UPDATE" or event == "PARTY_MEMBERS_CHANGED" or event == "RAID_ROSTER_UPDATE" then
         SyncGroupState(false)
+
+    elseif event == "PLAYER_DEAD" then
+        OnDeath()
+    elseif event == "PLAYER_ALIVE" or event == "PLAYER_UNGHOST" then
+        OnAlive(event)
+    elseif event == "PLAYER_MONEY" then
+        SyncMoney(false)
+    elseif event == "CHAT_MSG_COMBAT_XP_GAIN" then
+        OnXPMessage((...))
+    elseif event == "PLAYER_PVP_KILLS_CHANGED" or event == "PLAYER_LOGOUT" then
+        SyncHonor()
+    elseif event == "CHAT_MSG_SYSTEM" then
+        OnGameNotice((...))
+    elseif event == "UI_INFO_MESSAGE" then
+        -- Newer clients pass a message type first, older ones only the text.
+        local a, b = ...
+        OnGameNotice(type(b) == "string" and b or a)
+    elseif event == "ZONE_CHANGED" or event == "ZONE_CHANGED_INDOORS" or event == "ZONE_CHANGED_NEW_AREA" then
+        NotePlace()
+        NoteTravel()
+    elseif event == "QUEST_DETAIL" then
+        OnQuestDetail()
     end
 end)
 
@@ -895,16 +1273,22 @@ end
 -- often overnight, never counts as a gap.
 local function AllSessions()
     local list = QuestPaceLogDB.sessions or {}
-    local all = { entries = {}, dungeons = {}, rests = {}, groups = {}, entryRuns = {}, xpTotal = 0, xpFromQuests = 0, sessionCount = #list }
+    local all = { entries = {}, dungeons = {}, rests = {}, groups = {}, deaths = {}, discoveries = {}, flightPaths = {},
+        entryRuns = {}, xpTotal = 0, xpFromQuests = 0, sessionCount = #list, playedSec = 0 }
+    local sums = { "kills", "killXP", "moneyGained", "moneySpent", "moneyFromQuests", "honorKills" }
     all.startedAtStr = list[1] and list[1].startedAtStr or "?"
     for _, one in ipairs(list) do
-        for _, k in ipairs({ "entries", "dungeons", "rests", "groups" }) do
+        for _, k in ipairs({ "entries", "dungeons", "rests", "groups", "deaths", "discoveries", "flightPaths" }) do
             for _, v in ipairs(one[k] or {}) do table.insert(all[k], v) end
         end
         table.insert(all.entryRuns, one.entries or {})
         all.xpTotal = all.xpTotal + (one.xpTotal or 0)
         all.xpFromQuests = all.xpFromQuests + (one.xpFromQuests or 0)
         if (one.xpTotal or 0) > 0 then all.xpPlayedSec = (all.xpPlayedSec or 0) + (PlayedSec(one) or 0) end
+        all.playedSec = all.playedSec + (PlayedSec(one) or 0)
+        for _, k in ipairs(sums) do
+            if one[k] then all[k] = (all[k] or 0) + one[k] end
+        end
     end
     return all
 end
@@ -918,7 +1302,8 @@ local function ReportLines(s, allTime)
     -- Notes like "still resting" only make sense live. A record left open by
     -- an old session's logout isn't still going.
     local live = not allTime
-    if not s or (#s.entries == 0 and #s.dungeons == 0 and #s.rests == 0 and #s.groups == 0 and (s.xpTotal or 0) == 0) then
+    if not s or (#s.entries == 0 and #s.dungeons == 0 and #s.rests == 0 and #s.groups == 0 and (s.xpTotal or 0) == 0
+        and #(s.deaths or {}) == 0 and #(s.discoveries or {}) == 0 and #(s.flightPaths or {}) == 0 and (s.kills or 0) == 0) then
         add("|cff33ff99[QuestPaceLog]|r Nothing to report yet.")
         return out
     end
@@ -1078,6 +1463,26 @@ local function ReportLines(s, allTime)
         add("Time played at each level, " .. table.concat(strs, ", ") .. ". Estimated levels come from quest levels, before 1.8 recorded level-ups.")
     end
 
+    -- Kills, deaths, gold, discoveries and PvP (2.0).
+    if (s.kills or 0) > 0 then
+        add(string.format("Kills %s, %d, worth %d XP%s.", scope, s.kills, s.killXP or 0,
+            (s.xpTotal or 0) > 0 and string.format(" (%d%% of all XP)", math.floor((s.killXP or 0) / s.xpTotal * 100 + 0.5)) or ""))
+    end
+    if #(s.deaths or {}) > 0 then
+        local down = 0
+        for _, d in ipairs(s.deaths) do down = down + (d.downSec or 0) end
+        add(string.format("Deaths %s, %d, %s spent dead.", scope, #s.deaths, MinSec(down)))
+    end
+    if (s.moneyGained or 0) > 0 or (s.moneySpent or 0) > 0 then
+        add(string.format("Gold %s, %s earned, %s of it from quest rewards, %s spent.", scope, Gold(s.moneyGained), Gold(s.moneyFromQuests), Gold(s.moneySpent)))
+    end
+    if #(s.discoveries or {}) > 0 or #(s.flightPaths or {}) > 0 then
+        local dxp = 0
+        for _, d in ipairs(s.discoveries or {}) do dxp = dxp + (d.xp or 0) end
+        add(string.format("Places discovered %s, %d, worth %d XP. Flight paths learned, %d.", scope, #(s.discoveries or {}), dxp, #(s.flightPaths or {})))
+    end
+    if (s.honorKills or 0) > 0 then add(string.format("Honorable kills %s, %d.", scope, s.honorKills)) end
+
     -- Quest difficulty, across every session, not only this one.
     local tracked, wentGray, grayThenDone, dropped = 0, 0, 0, 0
     for _, rec in pairs(QuestTracker()) do
@@ -1172,6 +1577,184 @@ local function Short(sec)
     return string.format("%dm", math.floor(sec / 60))
 end
 
+-- Lenses. The same data seen the way each of Bartle's four kinds of player
+-- would look at it, plus the Compass, which places your own play on Bartle's
+-- graph. Each lens returns five tiles, a titled list of bars and a note.
+local LENSES = {
+    { "overview", "Overview" }, { "achiever", "Achiever" }, { "explorer", "Explorer" },
+    { "socializer", "Socializer" }, { "competitor", "Competitor" }, { "compass", "Compass" },
+}
+
+local function InScope(s, at)
+    return s.entryRuns ~= nil or (at and session and at >= session.startedAt)
+end
+
+local function GroupedSec(s)
+    local sec = 0
+    for _, g in ipairs(s.groups or {}) do
+        sec = sec + (g.durationSec or ((s == session and g.joinedAt) and (time() - g.joinedAt) or 0))
+    end
+    return sec
+end
+
+-- How strongly your play leans each way, 0 to 1, from your own pace. The
+-- scales are rough, a full score is 10 quests an hour, 8 discovery points an
+-- hour, all your time grouped, or 60 kills an hour.
+-- ponytail: fixed scales, not calibrated against other players (which the
+-- addon never sees). Retune them once there's a few weeks of your own data.
+local function CompassScores(s, st)
+    local hours = (st.playedSec or 0) / 3600
+    if hours < 1 / 6 then return nil end
+    local places = 0
+    for _, p in pairs(QuestPaceLogDB.places or {}) do if InScope(s, p.firstAt) then places = places + 1 end end
+    local explore = #(s.discoveries or {}) + 2 * #(s.flightPaths or {}) + 0.5 * places
+    local scores = {
+        achiever = math.min(1, st.done / hours / 10),
+        explorer = math.min(1, explore / hours / 8),
+        socializer = math.min(1, GroupedSec(s) / math.max(1, st.playedSec)),
+        competitor = math.min(1, (s.kills or 0) / hours / 60 + (s.honorKills or 0) / hours / 10),
+    }
+    local best, bestV = "achiever", -1
+    for _, k in ipairs({ "achiever", "explorer", "socializer", "competitor" }) do
+        if scores[k] > bestV then best, bestV = k, scores[k] end
+    end
+    scores.dominant = best
+    scores.hours = hours
+    scores.places = places
+    return scores
+end
+
+local LENS_COLOR = {
+    achiever = { 1, 0.82, 0 }, explorer = { 0.3, 0.78, 0.7 }, socializer = { 0.62, 0.45, 1 },
+    competitor = { 0.9, 0.35, 0.3 }, compass = { 0.75, 0.75, 0.8 },
+}
+
+local function Pct(part, whole) return whole > 0 and math.floor(part / whole * 100 + 0.5) or 0 end
+
+local function LensData(lens, s, st, allTime)
+    local hours = math.max((st.playedSec or 0) / 3600, 1 / 60)
+    local d = { tiles = {}, rows = {}, color = LENS_COLOR[lens] }
+    local function tile(value, label) table.insert(d.tiles, { value, label }) end
+
+    if lens == "achiever" then
+        local eta = not allTime and LevelETA() or nil
+        local g, goal = GoalPace(), QuestPaceLogDB.goal
+        local best = Records().questXPPerMin
+        tile(st.xpPerMin and tostring(math.floor(st.xpPerMin + 0.5)) or "none yet", "XP per minute played")
+        tile(string.format("%.1f", st.done / hours), "quests turned in an hour")
+        tile(eta and MinSec(eta) or "n/a", eta and ("to level " .. (UnitLevel("player") + 1)) or "to the next level, live only")
+        tile(goal and (g and g.done and "done" or string.format("%d to go", g and g.left or 0)) or "none", goal and ("levels to " .. goal.level .. (goal.byStr and (" by " .. goal.byStr) or "")) or "goal, set with /qpl goal 20")
+        tile(best and tostring(best.value) or "none yet", "best XP a minute on a quest")
+        d.title = "Each level against the one before"
+        local hist = LevelHistory()
+        for i = math.max(1, #hist - 11), #hist do
+            local h, prev = hist[i], hist[i - 1]
+            local cmp = ""
+            if prev and prev.level == h.level - 1 and prev.sec > 0 then
+                local change = (h.sec - prev.sec) / prev.sec * 100
+                cmp = string.format(", %d%% %s", math.abs(math.floor(change + 0.5)), change <= 0 and "faster" or "slower")
+            end
+            table.insert(d.rows, { "Level " .. h.level, h.sec, MinSec(h.sec) .. cmp })
+        end
+        d.note = #d.rows == 0 and "Levels show here once you finish one start to end in a session, from version 1.8 on. Records and goals cheer in chat, /qpl cheer off quiets them."
+            or "Only levels started and finished in one session count, so their length is exact. /qpl records lists your bests."
+
+    elseif lens == "explorer" then
+        local dxp, zones, zoneCount = 0, {}, 0
+        for _, x in ipairs(s.discoveries or {}) do dxp = dxp + (x.xp or 0) end
+        for _, e in ipairs(s.entries) do
+            if e.turnedInZone and not zones[e.turnedInZone] then zones[e.turnedInZone], zoneCount = true, zoneCount + 1 end
+        end
+        local places = 0
+        for _, p in pairs(QuestPaceLogDB.places or {}) do if InScope(s, p.firstAt) then places = places + 1 end end
+        tile(tostring(#(s.discoveries or {})), "places discovered")
+        tile(Thousands(dxp), "XP from discovering")
+        tile(tostring(#(s.flightPaths or {})), "flight paths learned")
+        tile(tostring(places), "places visited, from 2.0 on")
+        tile(tostring(zoneCount), "zones you turned quests in")
+        d.title = "Quests that sent you farthest"
+        local list = {}
+        for _, rec in pairs(QuestTracker()) do
+            if rec.zones and #rec.zones > 1 and (InScope(s, rec.acceptedAt) or InScope(s, rec.turnedInAt)) then table.insert(list, rec) end
+        end
+        table.sort(list, function(a, b) return #a.zones > #b.zones end)
+        for i = 1, math.min(12, #list) do
+            table.insert(d.rows, { list[i].title or "?", #list[i].zones, table.concat(list[i].zones, ", ") })
+        end
+        d.note = "Discoveries are the game's own Discovered messages. /qpl journal and part of a quest name shows the text of a quest you accepted."
+
+    elseif lens == "socializer" then
+        local groupedSec, closed, total = GroupedSec(s), 0, 0
+        for _, g in ipairs(s.groups or {}) do if g.durationSec then closed, total = closed + 1, total + g.durationSec end end
+        local groupQuests = 0
+        for _, e in ipairs(s.entries) do if e.suggestedGroup and e.turnedInAt then groupQuests = groupQuests + 1 end end
+        tile(Pct(groupedSec, st.playedSec or 0) .. "%", "of your time in a group")
+        tile(tostring(#(s.groups or {})), "groups joined")
+        tile(closed > 0 and MinSec(total / closed) or "none yet", "average time together")
+        tile(Pct(st.grouped, st.grouped + st.solo) .. "%", "of turn-ins in a group")
+        tile(tostring(groupQuests), "group quests turned in")
+        if #(s.dungeons or {}) > 0 then
+            d.title = "Dungeon runs"
+            for i = math.max(1, #s.dungeons - 11), #s.dungeons do
+                local dg = s.dungeons[i]
+                local kills = 0
+                for _, b in ipairs(dg.bosses or {}) do if b.success then kills = kills + 1 end end
+                table.insert(d.rows, { dg.name or "?", dg.durationSec or 0, string.format("%s, %s, %d %s down",
+                    dg.durationSec and MinSec(dg.durationSec) or "still inside", dg.groupSize and (dg.groupSize .. " players") or "group size not recorded", kills, kills == 1 and "boss" or "bosses") })
+            end
+        else
+            d.title = "Groups"
+            for i = math.max(1, #(s.groups or {}) - 11), #(s.groups or {}) do
+                local g = s.groups[i]
+                table.insert(d.rows, { string.format("Group of %d", g.maxSize or 2), g.durationSec or 0, g.durationSec and (MinSec(g.durationSec) .. " together") or "still together" })
+            end
+        end
+        d.note = "Only how many people were in your group is recorded, never who they were."
+
+    elseif lens == "competitor" then
+        local down, ghost = 0, 0
+        for _, x in ipairs(s.deaths or {}) do down, ghost = down + (x.downSec or 0), ghost + (x.ghostSec or 0) end
+        tile(Thousands(s.kills or 0), "kills")
+        tile(string.format("%.0f", (s.kills or 0) / hours), "kills an hour")
+        tile(Pct(s.killXP or 0, st.xpTotal) .. "%", "of XP from kills")
+        tile(tostring(#(s.deaths or {})), "deaths")
+        tile(MinSec(down), "spent dead")
+        d.title = "Deaths"
+        for i = math.max(1, #(s.deaths or {}) - 11), #(s.deaths or {}) do
+            local x = s.deaths[i]
+            table.insert(d.rows, { string.format("Level %d, %s", x.level or 0, x.zone or "?"), x.downSec or 0,
+                x.downSec and (MinSec(x.downSec) .. " dead" .. (x.ghostSec and (", " .. MinSec(x.ghostSec) .. " as a ghost") or "")) or "still dead" })
+        end
+        d.note = (#d.rows == 0 and "No deaths yet. " or "") .. "Your rival is your own past, other players are never recorded."
+            .. ((s.honorKills or 0) > 0 and (" Honorable kills, " .. s.honorKills .. ".") or "")
+
+    elseif lens == "compass" then
+        local sc = CompassScores(s, st)
+        d.title = "How your play leans"
+        if sc then
+            for _, k in ipairs({ "achiever", "explorer", "socializer", "competitor" }) do
+                tile(math.floor(sc[k] * 100 + 0.5) .. "%", k)
+            end
+            tile(sc.dominant:sub(1, 1):upper() .. sc.dominant:sub(2), "you play most like")
+            d.scores = sc
+            local details = {
+                achiever = string.format("%.1f quests an hour", st.done / sc.hours),
+                explorer = string.format("%d discoveries, %d flight paths, %d places", #(s.discoveries or {}), #(s.flightPaths or {}), sc.places),
+                socializer = Pct(GroupedSec(s), st.playedSec) .. "% of your time grouped",
+                competitor = string.format("%.0f kills an hour", (s.kills or 0) / sc.hours),
+            }
+            for _, k in ipairs({ "achiever", "explorer", "socializer", "competitor" }) do
+                table.insert(d.rows, { k:sub(1, 1):upper() .. k:sub(2), sc[k], details[k], LENS_COLOR[k] })
+            end
+        else
+            for i = 1, 5 do tile("n/a", i == 5 and "play 10 minutes first" or "") end
+        end
+        d.note = "Bartle's four kinds of player on his own graph, from what you did, not who you are. Acting is up, interacting down, the world right, other players left. "
+            .. "This addon only sees your own character, so the dot leans toward the world side."
+    end
+    return d
+end
+
 local function BuildWindow()
     local f, styled = TryCreate("Frame", "QuestPaceLogFrame", UIParent, "BasicFrameTemplateWithInset")
     -- No taller than the screen. The corner grip makes it taller or shorter.
@@ -1208,14 +1791,18 @@ local function BuildWindow()
     end
     if UISpecialFrames then table.insert(UISpecialFrames, "QuestPaceLogFrame") end -- Escape closes it
 
+    -- Overview widgets live in ov and lens widgets in lv, so each view hides as a whole.
+    local ov, lv = CreateFrame("Frame", nil, f), CreateFrame("Frame", nil, f)
+    ov:SetAllPoints(); lv:SetAllPoints()
+    local P = f
     local function text(x, y, template, point)
-        local fs = f:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
+        local fs = P:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
         -- Centered text is placed from the window's top left, like everything else.
         if point == "CENTER" then fs:SetPoint("CENTER", f, "TOPLEFT", x, y) else fs:SetPoint(point or "TOPLEFT", x, y) end
         return fs
     end
     local function box(x, y, w, h, c, a)
-        local t = f:CreateTexture(nil, "ARTWORK")
+        local t = P:CreateTexture(nil, "ARTWORK")
         t:SetPoint("TOPLEFT", x, y)
         t:SetSize(w, h)
         t:SetColorTexture(c[1], c[2], c[3], a or 1)
@@ -1234,20 +1821,25 @@ local function BuildWindow()
         box(PAD, y - 16, INNER, 1, GOLD, 0.25)
     end
 
-    text(0, -6, "GameFontHighlight", "TOP"):SetText("Quest Pace Log")
+    local titleText = text(0, -6, "GameFontHighlight", "TOP")
 
-    local tabs = {}
-    local function tab(label, x, allTime)
+    local function button(label, x, w, onClick)
         local b = TryCreate("Button", nil, f, "UIPanelButtonTemplate")
-        b:SetSize(130, 22)
+        b:SetSize(w, 22)
         b:SetPoint("TOPLEFT", x, -32)
         b:SetText(label)
-        b:SetScript("OnClick", function() f.Show_(allTime) end)
-        tabs[allTime] = b
+        b:SetScript("OnClick", onClick)
+        return b
     end
-    tab("This session", PAD, false)
-    tab("All sessions", PAD + 138, true)
-    local scopeText = text(-PAD - 4, -38, "GameFontNormalSmall", "TOPRIGHT")
+    local scopeButton = button("All sessions", PAD, 112, function() f.Show_(not f.allTime, f.lens) end)
+    local lensButtons = {}
+    for i, l in ipairs(LENSES) do
+        lensButtons[l[1]] = button(l[2], PAD + 116 + (i - 1) * 94, 90, function()
+            Settings().lens = l[1] -- your choice beats the Compass's guess next time
+            f.Show_(f.allTime, l[1])
+        end)
+    end
+    button("Card", PAD + 116 + 6 * 94, 52, function() f.ShowCard_() end)
 
     -- Five tiles, each with a gold line on top.
     local tiles, tileW = {}, (INNER - 4 * 8) / 5
@@ -1267,7 +1859,7 @@ local function BuildWindow()
         local seg = 2 * math.pi * DONUT_R / DONUT_DOTS + 1.5
         for i = 1, DONUT_DOTS do
             local angle = math.pi / 2 - (i - 0.5) / DONUT_DOTS * 2 * math.pi
-            local t = f:CreateTexture(nil, "ARTWORK")
+            local t = P:CreateTexture(nil, "ARTWORK")
             t:SetSize(seg, DONUT_THICK)
             t:SetPoint("CENTER", f, "TOPLEFT", cx + DONUT_R * math.cos(angle), cy + DONUT_R * math.sin(angle))
             if t.SetRotation then pcall(t.SetRotation, t, angle - math.pi / 2) end
@@ -1304,6 +1896,7 @@ local function BuildWindow()
         d.legend:SetText(#lines > 0 and table.concat(lines, "\n") or emptyNote)
     end
 
+    P = ov
     heading(-136, "Where your XP, quest colors and turn-ins come from")
     local colW = INNER / 3
     local donuts = {
@@ -1323,7 +1916,7 @@ local function BuildWindow()
         name:SetJustifyH("LEFT")
         if name.SetWordWrap then name:SetWordWrap(false) end
         -- An invisible strip over the row, so hovering shows the quest's details.
-        local hit = CreateFrame("Frame", nil, f)
+        local hit = CreateFrame("Frame", nil, P)
         hit:SetPoint("TOPLEFT", PAD, y + 3)
         hit:SetSize(INNER, 18)
         hit:EnableMouse(true)
@@ -1360,6 +1953,38 @@ local function BuildWindow()
     end
     local levelNote = text(-PAD, -500, "GameFontHighlightSmall", "TOPRIGHT")
 
+    -- Lens views, in lv. A heading, twelve rows of bars, a note, and the Compass graph.
+    P = lv
+    local lensTitle = text(PAD, -136, "GameFontNormal")
+    box(PAD, -152, INNER, 1, GOLD, 0.25)
+    local lensRows = {}
+    for i = 1, 12 do
+        local name = text(PAD, 0)
+        name:SetJustifyH("LEFT")
+        if name.SetWordWrap then name:SetWordWrap(false) end
+        lensRows[i] = { name = name, bar = box(PAD, 0, 1, 12, GOLD), info = text(PAD, 0) }
+    end
+    local lensNote = text(PAD, -440)
+    lensNote:SetWidth(INNER)
+    lensNote:SetJustifyH("LEFT")
+    -- Bartle's graph. Acting up, interacting down, players left, world right.
+    local CX, CY, HALF = PAD + 120, -290, 110
+    local compass = { box(CX - HALF, CY + HALF, 2 * HALF, 2 * HALF, { 1, 1, 1 }, 0.05), box(CX - HALF, CY + 1, 2 * HALF, 1, GOLD, 0.35), box(CX, CY + HALF, 1, 2 * HALF, GOLD, 0.35) }
+    for _, q in ipairs({ { "Competitor", -HALF / 2, HALF - 12 }, { "Achiever", HALF / 2, HALF - 12 }, { "Socializer", -HALF / 2, -HALF + 12 }, { "Explorer", HALF / 2, -HALF + 12 } }) do
+        local t = text(CX + q[2], CY + q[3], "GameFontNormalSmall", "CENTER")
+        t:SetText(q[1])
+        table.insert(compass, t)
+    end
+    for _, a in ipairs({ { "acting", 0, HALF + 10 }, { "interacting", 0, -HALF - 10 }, { "players", -HALF - 26, 0 }, { "world", HALF + 22, 0 } }) do
+        local t = text(CX + a[2], CY + a[3], "GameFontHighlightSmall", "CENTER")
+        t:SetText(a[1])
+        table.insert(compass, t)
+    end
+    local dot = box(CX - 6, CY + 6, 12, 12, { 1, 1, 1 })
+    table.insert(compass, dot)
+    P = f
+
+    local hint = text(PAD, -612 + 18)
     heading(-612, "Full report")
     local scroll = TryCreate("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", PAD, -636)
@@ -1371,6 +1996,58 @@ local function BuildWindow()
     report:SetWidth(INNER - 30)
     report:SetScript("OnEscapePressed", function() f:Hide() end)
     scroll:SetScrollChild(report)
+
+    function f.UpdateLens(lens, s, st, allTime)
+        local d = LensData(lens, s, st, allTime)
+        for i = 1, 5 do
+            local t = d.tiles[i] or { "", "" }
+            tiles[i].value:SetText(t[1]); tiles[i].label:SetText(t[2])
+        end
+        lensTitle:SetText(d.title or "")
+        lensNote:SetText(d.note or "")
+        local isCompass = lens == "compass"
+        for _, w in ipairs(compass) do if isCompass then w:Show() else w:Hide() end end
+        -- On the Compass the list sits right of the graph, elsewhere it spans the window.
+        local left = isCompass and (PAD + 2 * HALF + 70) or PAD
+        local nameW = isCompass and 90 or 270
+        local barMax = isCompass and 160 or 280
+        local most = 0
+        for _, r in ipairs(d.rows) do if r[2] > most then most = r[2] end end
+        for i, row in ipairs(lensRows) do
+            local r = d.rows[i]
+            if r then
+                local y = -164 - (i - 1) * 22
+                local w = most > 0 and math.max(2, math.floor(barMax * r[2] / most)) or 2
+                if isCompass then w = math.max(2, math.floor(barMax * r[2])) end
+                local c = r[4] or d.color
+                row.name:ClearAllPoints(); row.name:SetPoint("TOPLEFT", left, y); row.name:SetWidth(nameW - 8); row.name:SetText(r[1])
+                row.bar:SetColorTexture(c[1], c[2], c[3], 0.9)
+                place(row.bar, left + nameW, y - 1, w)
+                row.info:ClearAllPoints(); row.info:SetPoint("TOPLEFT", left + nameW + w + 6, y); row.info:SetText(r[3])
+                row.name:Show(); row.info:Show()
+            else
+                row.name:Hide(); row.bar:Hide(); row.info:Hide()
+            end
+        end
+        if isCompass and d.scores then
+            local sc, total = d.scores, d.scores.achiever + d.scores.explorer + d.scores.socializer + d.scores.competitor
+            local x = total > 0 and ((sc.achiever + sc.explorer) - (sc.competitor + sc.socializer)) / total or 0
+            local y = total > 0 and ((sc.achiever + sc.competitor) - (sc.explorer + sc.socializer)) / total or 0
+            dot:ClearAllPoints()
+            dot:SetPoint("CENTER", f, "TOPLEFT", CX + x * (HALF - 10), CY + y * (HALF - 10))
+            dot:Show()
+        elseif isCompass then
+            dot:Hide()
+        end
+    end
+
+    function f.ShowCard_()
+        local s = f.allTime and AllSessions() or session
+        report:SetText(CardText(s, f.allTime))
+        report:SetFocus()
+        report:HighlightText()
+        hint:SetText("Your card is selected in the box below. Press Ctrl+C to copy it, then paste it wherever you like.")
+    end
 
     function f.UpdateVisuals(st)
         local avg = st.closedCount > 0 and st.closedTotal / st.closedCount or nil
@@ -1449,15 +2126,25 @@ local function BuildWindow()
         end
     end
 
-    function f.Show_(allTime)
+    function f.Show_(allTime, lens)
         f.allTime = allTime
         local s = allTime and AllSessions() or session
-        scopeText:SetText(allTime and "Showing all sessions" or "Showing this session")
-        for which, b in pairs(tabs) do
-            if which == allTime then b:LockHighlight() else b:UnlockHighlight() end
+        titleText:SetText("Quest Pace Log, " .. (allTime and "all sessions" or "this session"))
+        scopeButton:SetText(allTime and "This session" or "All sessions")
+        local st = s and DashboardStats(s)
+        local sc = st and CompassScores(s, st)
+        lens = lens or f.lens or Settings().lens or (sc and sc.dominant) or "overview"
+        f.lens = lens
+        for _, l in ipairs(LENSES) do
+            local b = lensButtons[l[1]]
+            b:SetText((sc and sc.dominant == l[1]) and ("|cffffd200" .. l[2] .. " (you)|r") or l[2])
+            if l[1] == lens then b:LockHighlight() else b:UnlockHighlight() end
         end
+        hint:SetText(not Settings().lens and "New here? Open Compass to see which way your play leans. The window opens on that lens once you've played 10 minutes." or "")
+        if lens == "overview" then ov:Show() else ov:Hide() end
+        if lens == "overview" then lv:Hide() else lv:Show() end
         if s then
-            local ok, err = pcall(f.UpdateVisuals, DashboardStats(s))
+            local ok, err = pcall(lens == "overview" and f.UpdateVisuals or function(x) f.UpdateLens(lens, s, x, allTime) end, st)
             if not ok and not f.warned then
                 f.warned = true
                 print("|cff33ff99[QuestPaceLog]|r The tiles and charts couldn't draw, " .. tostring(err) .. ". The report below them still works.")
@@ -1470,7 +2157,7 @@ local function BuildWindow()
     return f
 end
 
-local function ShowWindow(allTime)
+local function ShowWindow(allTime, lens)
     if not window then
         local ok, f = pcall(BuildWindow)
         if not ok then
@@ -1479,7 +2166,12 @@ local function ShowWindow(allTime)
         end
         window = f
     end
-    window.Show_(allTime)
+    window.Show_(allTime, lens)
+end
+
+local function ShowCard(allTime)
+    ShowWindow(allTime)
+    if window then window.ShowCard_() end
 end
 
 -- A small book button by the minimap. Left-click opens or closes the
@@ -1522,7 +2214,10 @@ SlashCmdList["QUESTPACELOG"] = function(msg)
     elseif command == "report" then
         PrintReport(rest == "all")
     elseif command == "show" then
-        ShowWindow(rest == "all")
+        local all = rest:find("all", 1, true) ~= nil
+        local lens = rest:match("(%a+)$")
+        if lens == "all" then lens = nil end
+        ShowWindow(all, lens)
     elseif command == "" or command == "log" then
         PrintLog()
     elseif command == "skip" then
@@ -1531,6 +2226,34 @@ SlashCmdList["QUESTPACELOG"] = function(msg)
         Unskip(rest)
     elseif command == "why" then
         TagReason(rest)
+    elseif command == "cheer" then
+        if rest == "on" or rest == "off" then Settings().cheer = (rest == "on") end
+        print("|cff33ff99[QuestPaceLog]|r Records, level and goal messages are " .. (Settings().cheer and "on" or "off") .. ". /qpl cheer on or /qpl cheer off.")
+    elseif command == "goal" then
+        SetGoal(rest)
+    elseif command == "eta" then
+        local eta = LevelETA()
+        print("|cff33ff99[QuestPaceLog]|r " .. (eta and string.format("At this session's pace, level %d in about %s of play.", UnitLevel("player") + 1, MinSec(eta))
+            or "Not enough XP this session yet to estimate the next level."))
+    elseif command == "records" then
+        local any = false
+        for key, name in pairs(RECORD_NAMES) do
+            local r = Records()[key]
+            if r then any = true print(string.format("%s, %s, %s.", name, r.label or tostring(r.value), date("%Y-%m-%d", r.at))) end
+        end
+        if not any then print("|cff33ff99[QuestPaceLog]|r No records yet.") end
+    elseif command == "journal" then
+        local best
+        for id, j in pairs(QuestPaceLogDB.journal or {}) do
+            if (rest == "" or (j.title or ""):lower():find(rest, 1, true)) and (not best or j.savedAt > best.savedAt) then best = j end
+        end
+        if best then
+            print("|cff33ff99[QuestPaceLog]|r " .. best.title .. ". " .. (best.text or "") .. (best.objective and (" Objective, " .. best.objective) or ""))
+        else
+            print("|cff33ff99[QuestPaceLog]|r No saved quest text" .. (rest ~= "" and (" matching \"" .. rest .. "\"") or "") .. ".")
+        end
+    elseif command == "card" then
+        ShowCard(rest == "all")
     elseif command == "buffs" then
         local names = PlayerBuffNames()
         print("|cff33ff99[QuestPaceLog]|r Your buffs right now, " .. (#names > 0 and table.concat(names, ", ") or "none") .. ".")
@@ -1550,6 +2273,6 @@ SlashCmdList["QUESTPACELOG"] = function(msg)
             print("|cff33ff99[QuestPaceLog]|r Watching as camp buffs, " .. table.concat(list, ", ") .. ". Use /qpl campbuff add <name> or /qpl campbuff remove <name>, and /qpl buffs to see your current buffs.")
         end
     else
-        print("|cff33ff99[QuestPaceLog]|r Commands, /qpl start for a new session, /qpl for the log, /qpl report for a summary, /qpl report all for every session, /qpl show for a window, /qpl skip [name] to mark backlog, /qpl unskip [name] to undo, /qpl why <a-g> [name] to say why a quest was parked, /qpl buffs and /qpl campbuff for camp tracking.")
+        print("|cff33ff99[QuestPaceLog]|r Commands, /qpl start for a new session, /qpl for the log, /qpl report for a summary, /qpl report all for every session, /qpl show for a window, /qpl skip [name] to mark backlog, /qpl unskip [name] to undo, /qpl why <a-g> [name] to say why a quest was parked, /qpl buffs and /qpl campbuff for camp tracking, /qpl goal, /qpl eta, /qpl records, /qpl journal [name], /qpl card, /qpl cheer on or off.")
     end
 end
