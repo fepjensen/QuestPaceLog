@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9, 2026-10-03
+
+- Fixed the donut titles and percentages, which were placed from the middle of the window instead of its top left, so they showed up near the bottom or off screen.
+- Time at each level now covers sessions before 1.8 too, estimated from the levels quests and dungeons recorded, with each level-up placed halfway between the last moment at the old level and the first at the new one. Estimated levels are marked in /qpl report and drawn lighter in the dashboard.
+- Shorter donut legends, so they don't run into the next donut.
+- No change to the saved data format. 1.7's donuts confirmed drawing in the real Forever client on 2026-10-03.
+
 ## 1.8, 2026-10-03
 
 - Sessions record `startLevel` and `levelUps`, a list of each level reached and when. Time played at each level is worked out from those, within sessions only, so time logged out never counts. Shown in /qpl report and as columns in the dashboard. Sessions before 1.8 have neither, so they aren't counted.

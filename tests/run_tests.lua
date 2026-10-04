@@ -451,7 +451,7 @@ test("dashboard tiles and bars show the right numbers, and refresh on turn-in", 
     assert(shown(W, "100%"), "donut center")
     QuestPaceLogDB.sessions[1].entries[1].colorAtTurnIn = nil
     W.cmd("show all")
-    assert(shown(W, "1 yellow\n1 without a recorded color"), "turn-ins from before colors were recorded")
+    assert(shown(W, "1 yellow\n1 not recorded"), "turn-ins from before colors were recorded")
     assert(W.texts["Second Day"] and W.texts["4:00, 25 XP a minute"], "recent quest row with XP a minute")
     W.cmd("show")
     W.texts = {}
@@ -507,7 +507,7 @@ test("time played at each level, from the start level through level-ups", functi
     eq(QuestPaceLogDB.sessions[1].startLevel, 8, "start level saved")
     eq(QuestPaceLogDB.sessions[1].levelUps[1].level, 9, "level-up saved")
     W.cmd("report")
-    assert(W.saw("Time played at each level, level 8 10:00, level 9 5:00."), "level times in the report")
+    assert(W.saw("Time played at each level, level 8 10:00, level 9 5:00. Estimated"), "level times in the report")
     W.cmd("show")
     assert(W.texts["10m"] and W.texts["5m"], "level columns in the window")
 end)
@@ -539,6 +539,18 @@ test("the window is never taller than the screen", function()
     W.cmd("show")
     eq(W.windowHeight, 680, "clamped to the screen")
     _G.UIParent = nil
+end)
+
+test("sessions before 1.8 estimate time per level from quest levels", function()
+    local W = newWorld({ db = { sessions = { { startedAt = 1000, startedAtStr = "old", xpTotal = 900,
+        entries = {
+            { questID = 1, title = "A", acceptedAt = 1100, acceptedLevel = 5, turnedInAt = 1300, turnedInLevel = 5 },
+            { questID = 2, title = "B", acceptedAt = 1500, acceptedLevel = 6, turnedInAt = 1600, turnedInLevel = 6 },
+        } } } } })
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.cmd("report all")
+    -- Level 5 from the start through 1300 and on to the midpoint 1400, level 6 from there to 1600.
+    assert(W.saw("level 5 6:40 (estimated), level 6 3:20 (estimated)"), "estimated level times")
 end)
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))

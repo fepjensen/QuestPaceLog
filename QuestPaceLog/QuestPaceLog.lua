@@ -830,13 +830,43 @@ function PlayedSec(s)
     return s.startedAt and math.max(0, last - s.startedAt) or nil
 end
 
--- Seconds played at each level, { [level] = seconds }, from sessions that
--- know their starting level (1.8 on). Each session runs from its start
--- through every level-up to its last active moment, so time logged out
--- never counts.
+-- Seconds played at each level, { [level] = seconds }, and which levels are
+-- estimated, { [level] = true }. Sessions from 1.8 on know their start level
+-- and each level-up, so they run from the start through every level-up to
+-- the last active moment. Older sessions are estimated from the levels their
+-- quests and dungeons recorded, with each level-up placed halfway between
+-- the last moment at the old level and the first at the new one. Time logged
+-- out never counts.
+local function EstimateLevelTimes(one, out, est)
+    local pts = {}
+    for _, e in ipairs(one.entries or {}) do
+        if e.acceptedAt and e.acceptedLevel then table.insert(pts, { e.acceptedAt, e.acceptedLevel }) end
+        if e.turnedInAt and e.turnedInLevel then table.insert(pts, { e.turnedInAt, e.turnedInLevel }) end
+    end
+    for _, d in ipairs(one.dungeons or {}) do
+        if d.enteredAt and d.enteredLevel then table.insert(pts, { d.enteredAt, d.enteredLevel }) end
+        if d.leftAt and d.leftLevel then table.insert(pts, { d.leftAt, d.leftLevel }) end
+    end
+    if #pts == 0 then return end
+    table.sort(pts, function(a, b) return a[1] < b[1] end)
+    local function add(level, sec)
+        out[level] = (out[level] or 0) + math.max(0, sec)
+        est[level] = true
+    end
+    add(pts[1][2], pts[1][1] - one.startedAt)
+    for i = 2, #pts do
+        local a, b = pts[i - 1], pts[i]
+        local mid = (a[2] == b[2]) and b[1] or (a[1] + b[1]) / 2
+        add(a[2], mid - a[1])
+        add(b[2], b[1] - mid)
+    end
+    add(pts[#pts][2], one.startedAt + (PlayedSec(one) or 0) - pts[#pts][1])
+end
+
 function LevelTimes(s)
-    local out = {}
+    local out, est = {}, {}
     for _, one in ipairs(s.entryRuns and (QuestPaceLogDB.sessions or {}) or { s }) do
+        if not one.startLevel and one.startedAt then EstimateLevelTimes(one, out, est) end
         if one.startLevel and one.startedAt then
             local t0, lvl = one.startedAt, one.startLevel
             for _, lu in ipairs(one.levelUps or {}) do
@@ -847,7 +877,8 @@ function LevelTimes(s)
             out[lvl] = (out[lvl] or 0) + math.max(0, last - t0)
         end
     end
-    return out
+    for lvl, sec in pairs(out) do out[lvl] = math.floor(sec + 0.5) end
+    return out, est
 end
 
 -- XP per minute played, counting only sessions that tracked XP.
@@ -1035,13 +1066,16 @@ local function ReportLines(s, allTime)
     end
 
     -- Time at each level.
-    local levels, parts = LevelTimes(s), {}
+    local levels, estimated = LevelTimes(s)
+    local parts = {}
     for lvl, sec in pairs(levels) do table.insert(parts, { lvl, sec }) end
     table.sort(parts, function(a, b) return a[1] < b[1] end)
     if #parts > 0 then
         local strs = {}
-        for _, p in ipairs(parts) do table.insert(strs, string.format("level %d %d:%02d", p[1], math.floor(p[2] / 60), p[2] % 60)) end
-        add("Time played at each level, " .. table.concat(strs, ", ") .. ".")
+        for _, p in ipairs(parts) do
+            table.insert(strs, string.format("level %d %d:%02d%s", p[1], math.floor(p[2] / 60), p[2] % 60, estimated[p[1]] and " (estimated)" or ""))
+        end
+        add("Time played at each level, " .. table.concat(strs, ", ") .. ". Estimated levels come from quest levels, before 1.8 recorded level-ups.")
     end
 
     -- Quest difficulty, across every session, not only this one.
@@ -1106,7 +1140,7 @@ local function DashboardStats(s)
         st.playedSec = PlayedSec(s) or 0
     end
     st.xpPerMin = XPPerMinute(s)
-    st.levelTimes = LevelTimes(s)
+    st.levelTimes, st.levelEstimated = LevelTimes(s)
     return st
 end
 
@@ -1176,7 +1210,8 @@ local function BuildWindow()
 
     local function text(x, y, template, point)
         local fs = f:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
-        fs:SetPoint(point or "TOPLEFT", x, y)
+        -- Centered text is placed from the window's top left, like everything else.
+        if point == "CENTER" then fs:SetPoint("CENTER", f, "TOPLEFT", x, y) else fs:SetPoint(point or "TOPLEFT", x, y) end
         return fs
     end
     local function box(x, y, w, h, c, a)
@@ -1323,7 +1358,7 @@ local function BuildWindow()
     for i = 1, LEVEL_COLS do
         levelCols[i] = { bar = box(PAD, LEVEL_BASE, 1, 1, GOLD, 0.85), time = text(0, 0, "GameFontHighlightSmall", "CENTER"), level = text(0, 0, "GameFontNormalSmall", "CENTER") }
     end
-    local levelNote = text(PAD, -520)
+    local levelNote = text(-PAD, -500, "GameFontHighlightSmall", "TOPRIGHT")
 
     heading(-612, "Full report")
     local scroll = TryCreate("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
@@ -1345,7 +1380,7 @@ local function BuildWindow()
         tiles[4].value:SetText(Clock(st.playedSec)); tiles[4].label:SetText("time played")
         tiles[5].value:SetText(Clock(st.restSec)); tiles[5].label:SetText(string.format("resting, %d at campfires", st.campStays))
 
-        fill(donuts.xp, { { st.xpFromQuests, GOLD, "from quests" }, { math.max(0, st.xpTotal - st.xpFromQuests), SLATE, "from everything else" } }, "No XP gained yet.")
+        fill(donuts.xp, { { st.xpFromQuests, GOLD, "from quests" }, { math.max(0, st.xpTotal - st.xpFromQuests), SLATE, "everything else" } }, "No XP gained yet.")
         local colorParts, colored = {}, 0
         for _, c in ipairs(QUEST_COLORS) do
             local n = st.colors[c[1]] or 0
@@ -1356,7 +1391,7 @@ local function BuildWindow()
         table.sort(colorParts, function(a, b) return a[1] > b[1] end)
         -- Colors are recorded from 1.1 on, so older turn-ins have none.
         fill(donuts.colors, colorParts, "No quests turned in yet.",
-            (colored > 0 and st.done > colored) and ((st.done - colored) .. " without a recorded color") or nil)
+            (colored > 0 and st.done > colored) and ((st.done - colored) .. " not recorded") or nil)
         fill(donuts.group, { { st.grouped, VIOLET, "in a group" }, { st.solo, SLATE, "solo" } }, "No turn-ins since 1.3.")
 
         local levels = {}
@@ -1366,7 +1401,9 @@ local function BuildWindow()
         local most = 1
         for _, l in ipairs(levels) do if l[2] > most then most = l[2] end end
         local colW = math.min(36, math.floor(INNER / math.max(1, #levels)))
-        levelNote:SetText(#levels == 0 and "Recording starts with version 1.8. Sessions before it don't know when you leveled." or "")
+        local anyEstimated = false
+        for _, l in ipairs(levels) do if st.levelEstimated[l[1]] then anyEstimated = true end end
+        levelNote:SetText(#levels == 0 and "No levels recorded yet." or (anyEstimated and "Lighter columns are estimated from quest levels, before 1.8 recorded level-ups." or ""))
         for i, col in ipairs(levelCols) do
             local l = levels[i]
             if l then
@@ -1374,6 +1411,7 @@ local function BuildWindow()
                 col.bar:ClearAllPoints()
                 col.bar:SetPoint("BOTTOMLEFT", f, "TOPLEFT", x + 3, LEVEL_BASE)
                 col.bar:SetSize(colW - 6, h)
+                col.bar:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], st.levelEstimated[l[1]] and 0.4 or 0.9)
                 col.time:ClearAllPoints()
                 col.time:SetPoint("CENTER", f, "TOPLEFT", x + colW / 2, LEVEL_BASE + h + 8)
                 col.time:SetText(Short(l[2]))
