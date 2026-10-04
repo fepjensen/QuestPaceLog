@@ -16,7 +16,7 @@ QuestPaceLogDB = {
   journal  = { [questID] = { title, text, objective, savedAt }, ... },          -- 2.0, quest text kept at accept
   records  = { [key] = { value, at, label, session }, ... },                    -- 2.0, keys below
   goal     = { level, by, byStr, setAt, setLevel } or nil,                     -- 2.0, from /qpl goal
-  settings = { cheer = true or false, lens = "achiever" or nil },               -- 2.0
+  settings = { cheer = true or false, lens = "achiever" or nil, hud = false or nil },  -- 2.0, hud from 2.1
 }
 ```
 

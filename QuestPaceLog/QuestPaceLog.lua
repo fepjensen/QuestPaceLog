@@ -1785,10 +1785,16 @@ local function BuildWindow()
         local bg = f:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(0, 0, 0, 0.85)
-        local close = TryCreate("Button", nil, f, "UIPanelCloseButton")
-        close:SetPoint("TOPRIGHT")
-        close:SetScript("OnClick", function() f:Hide() end)
     end
+    -- The template's X hands off to the game's panel manager, which ignores
+    -- windows it doesn't manage, so it gets wired to hide this one directly.
+    -- Without a template X, the window makes its own.
+    local close = type(f.CloseButton) == "table" and f.CloseButton or nil
+    if not close then
+        close = TryCreate("Button", "QuestPaceLogFrameClose", f, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT")
+    end
+    close:SetScript("OnClick", function() f:Hide() end)
     if UISpecialFrames then table.insert(UISpecialFrames, "QuestPaceLogFrame") end -- Escape closes it
 
     -- Overview widgets live in ov and lens widgets in lv, so each view hides as a whole.
@@ -2174,6 +2180,163 @@ local function ShowCard(allTime)
     if window then window.ShowCard_() end
 end
 
+-- The on-screen tracker. A small panel that stays up while you play, combat
+-- included. The top follows your lens (the one you picked, else the one your
+-- play leans to), the bottom lists your 3 most recent open quests with a live
+-- timer, real clock time since you accepted them. Drag to move, the client
+-- keeps the spot. Click to open the dashboard. /qpl hud off hides it.
+local HUD_QUESTS, HUD_W = 3, 250
+
+local function HUDLens()
+    local lens = Settings().lens
+    if lens and lens ~= "overview" and lens ~= "compass" then return lens end
+    local ok, sc = pcall(function() return CompassScores(session, DashboardStats(session)) end)
+    return (ok and sc and sc.dominant) or "achiever"
+end
+
+local function HUDLines(lens)
+    local s = session
+    if lens == "explorer" then
+        local dxp = 0
+        for _, x in ipairs(s.discoveries or {}) do dxp = dxp + (x.xp or 0) end
+        local places = 0
+        for _, p in pairs(QuestPaceLogDB.places or {}) do if p.firstAt and p.firstAt >= s.startedAt then places = places + 1 end end
+        return string.format("Discovered %d, %d XP", #(s.discoveries or {}), dxp),
+            string.format("Flight paths %d, new places %d", #(s.flightPaths or {}), places)
+    elseif lens == "socializer" then
+        local last = s.groups and s.groups[#s.groups]
+        local now = (last and not last.leftAt) and string.format("In a group of %d for %s", GroupSize(), MinSec(time() - last.joinedAt)) or "Solo right now"
+        local grouped, played = 0, math.max(1, PlayedSec(s) or 1)
+        for _, g in ipairs(s.groups or {}) do grouped = grouped + (g.durationSec or (time() - g.joinedAt)) end
+        return now, string.format("Grouped %s this session, %d%%", MinSec(grouped), math.floor(grouped / played * 100 + 0.5))
+    elseif lens == "competitor" then
+        local down = 0
+        for _, d in ipairs(s.deaths or {}) do down = down + (d.downSec or 0) end
+        local hours = math.max((PlayedSec(s) or 0) / 3600, 1 / 60)
+        return string.format("Kills %d, %d an hour", s.kills or 0, math.floor((s.kills or 0) / hours + 0.5)),
+            string.format("Deaths %d, %s dead", #(s.deaths or {}), MinSec(down))
+    end
+    local eta, rate = LevelETA(), XPPerMinute(s)
+    local first = eta and string.format("Level %d in about %s, %d XP a minute", UnitLevel("player") + 1, MinSec(eta), math.floor(rate + 0.5))
+        or "Time to next level after a few minutes of XP"
+    local g, goal = GoalPace(), QuestPaceLogDB.goal
+    local second = goal and (g and g.done and string.format("Goal reached, level %d", goal.level)
+        or string.format("Goal, level %d, %d to go", goal.level, g and g.left or 0)) or "Set a goal with /qpl goal 20"
+    return first, second
+end
+
+-- Your open quests with an accept time, newest first, and how many others are open.
+local function HUDQuests()
+    local inLog, timed, total = ReadQuestLog(), {}, 0
+    local tracker = QuestTracker()
+    for id in pairs(inLog) do
+        total = total + 1
+        local rec = tracker[id]
+        if rec and rec.acceptedAt and not rec.turnedInAt then table.insert(timed, { title = rec.title or inLog[id].title, at = rec.acceptedAt }) end
+    end
+    table.sort(timed, function(a, b) return a.at > b.at end)
+    return timed, total
+end
+
+local hud
+local hudOk, hudErr = pcall(function()
+    hud = CreateFrame("Frame", "QuestPaceLogHUD", UIParent)
+    hud:SetSize(HUD_W, 52 + 16 * (HUD_QUESTS + 1) + 30)
+    hud:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -250, -220)
+    hud:SetFrameStrata("LOW")
+    hud:SetMovable(true)
+    hud:SetClampedToScreen(true)
+    hud:EnableMouse(true)
+    hud:RegisterForDrag("LeftButton")
+    local bg = hud:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0, 0, 0, 0.45)
+    local function line(y, template)
+        local fs = hud:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
+        fs:SetPoint("TOPLEFT", 8, y)
+        fs:SetWidth(HUD_W - 16)
+        fs:SetJustifyH("LEFT")
+        if fs.SetWordWrap then fs:SetWordWrap(false) end
+        return fs
+    end
+    hud.title = line(-6, "GameFontNormalSmall")
+    local track = hud:CreateTexture(nil, "ARTWORK")
+    track:SetPoint("TOPLEFT", 8, -22)
+    track:SetSize(HUD_W - 16, 10)
+    track:SetColorTexture(1, 1, 1, 0.12)
+    hud.xpFill = hud:CreateTexture(nil, "ARTWORK")
+    hud.xpFill:SetPoint("TOPLEFT", 8, -22)
+    hud.xpFill:SetSize(1, 10)
+    hud.xpFill:SetColorTexture(0.58, 0.36, 0.86, 0.9)
+    hud.xpText = hud:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    hud.xpText:SetPoint("CENTER", track, "CENTER", 0, 0)
+    hud.line1, hud.line2 = line(-38), line(-54)
+    local sep = hud:CreateTexture(nil, "ARTWORK")
+    sep:SetPoint("TOPLEFT", 8, -72)
+    sep:SetSize(HUD_W - 16, 1)
+    sep:SetColorTexture(1, 0.82, 0, 0.3)
+    hud.quests = {}
+    for i = 1, HUD_QUESTS do
+        local name, timer = line(-78 - (i - 1) * 16), hud:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        name:SetWidth(HUD_W - 76)
+        timer:SetPoint("TOPRIGHT", -8, -78 - (i - 1) * 16)
+        hud.quests[i] = { name = name, timer = timer }
+    end
+    hud.more = line(-78 - HUD_QUESTS * 16, "GameFontDisableSmall")
+
+    -- A press that ends without a drag opens the dashboard.
+    hud:SetScript("OnDragStart", function(self) self.dragged = true; self:StartMoving() end)
+    hud:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); self:SetUserPlaced(true) end)
+    hud:SetScript("OnMouseUp", function(self)
+        if not self.dragged then ShowWindow(false) end
+        self.dragged = false
+    end)
+
+    function hud.Refresh()
+        -- Saved settings load after this file runs, so the off switch is read here.
+        if Settings().hud == false then hud:Hide() return end
+        if not session then return end
+        if (hud.lensAt or 0) < time() - 30 then hud.lens, hud.lensAt = HUDLens(), time() end
+        local lens = hud.lens
+        hud.title:SetText("Quest Pace Log, " .. lens:sub(1, 1):upper() .. lens:sub(2))
+        local xp, max = UnitXP("player"), UnitXPMax("player")
+        local frac = (max and max > 0) and math.min(1, xp / max) or 0
+        hud.xpFill:SetWidth(math.max(1, (HUD_W - 16) * frac))
+        hud.xpText:SetText(string.format("Level %d, %d%%", UnitLevel("player"), math.floor(frac * 100)))
+        local a, b = HUDLines(lens)
+        hud.line1:SetText(a); hud.line2:SetText(b)
+        local quests, total = HUDQuests()
+        for i, row in ipairs(hud.quests) do
+            local q = quests[i]
+            row.name:SetText(q and q.title or (i == 1 and "No timed quests open" or ""))
+            row.timer:SetText(q and MinSec(time() - q.at) or "")
+        end
+        local shown = math.min(HUD_QUESTS, #quests)
+        hud.more:SetText(total > shown and string.format("+%d more in your log", total - shown) or "")
+    end
+
+    local wait = 0
+    hud:SetScript("OnUpdate", function(_, elapsed)
+        wait = wait + (elapsed or 0)
+        if wait < 1 then return end
+        wait = 0
+        local ok, err = pcall(hud.Refresh)
+        if not ok and not hud.warned then
+            hud.warned = true
+            print("|cff33ff99[QuestPaceLog]|r The on-screen tracker couldn't update, " .. tostring(err) .. ". /qpl hud off hides it.")
+        end
+    end)
+end)
+if not hudOk then
+    print("|cff33ff99[QuestPaceLog]|r The on-screen tracker couldn't be made on this client, " .. tostring(hudErr) .. ".")
+end
+
+local function SetHUD(on)
+    Settings().hud = on
+    if hud then if on then hud:Show() else hud:Hide() end end
+    print("|cff33ff99[QuestPaceLog]|r On-screen tracker " .. (on and "on" or "off") .. ". /qpl hud on or /qpl hud off.")
+end
+
 -- A small book button by the minimap. Left-click opens or closes the
 -- dashboard, drag moves it. The client keeps its spot in its own layout
 -- cache (SetUserPlaced), so no saved field is needed for it.
@@ -2252,6 +2415,8 @@ SlashCmdList["QUESTPACELOG"] = function(msg)
         else
             print("|cff33ff99[QuestPaceLog]|r No saved quest text" .. (rest ~= "" and (" matching \"" .. rest .. "\"") or "") .. ".")
         end
+    elseif command == "hud" then
+        SetHUD(rest ~= "off")
     elseif command == "card" then
         ShowCard(rest == "all")
     elseif command == "buffs" then
@@ -2273,6 +2438,6 @@ SlashCmdList["QUESTPACELOG"] = function(msg)
             print("|cff33ff99[QuestPaceLog]|r Watching as camp buffs, " .. table.concat(list, ", ") .. ". Use /qpl campbuff add <name> or /qpl campbuff remove <name>, and /qpl buffs to see your current buffs.")
         end
     else
-        print("|cff33ff99[QuestPaceLog]|r Commands, /qpl start for a new session, /qpl for the log, /qpl report for a summary, /qpl report all for every session, /qpl show for a window, /qpl skip [name] to mark backlog, /qpl unskip [name] to undo, /qpl why <a-g> [name] to say why a quest was parked, /qpl buffs and /qpl campbuff for camp tracking, /qpl goal, /qpl eta, /qpl records, /qpl journal [name], /qpl card, /qpl cheer on or off.")
+        print("|cff33ff99[QuestPaceLog]|r Commands, /qpl start for a new session, /qpl for the log, /qpl report for a summary, /qpl report all for every session, /qpl show for a window, /qpl skip [name] to mark backlog, /qpl unskip [name] to undo, /qpl why <a-g> [name] to say why a quest was parked, /qpl buffs and /qpl campbuff for camp tracking, /qpl goal, /qpl eta, /qpl records, /qpl journal [name], /qpl card, /qpl cheer on or off, /qpl hud on or off.")
     end
 end

@@ -756,5 +756,39 @@ test("every lens draws, and the window opens on the lens your play leans to", fu
     eq(_G.QuestPaceLogFrame.lens, "achiever", "opens on the dominant lens")
 end)
 
+test("the on-screen tracker shows your lens and the 3 newest open quests with timers", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    for i, title in ipairs({ "Old", "Middle", "Newer", "Newest" }) do
+        W.addQuest(1000 + i, title, 8)
+        W.fire("QUEST_ACCEPTED", 1000 + i)
+        W.clock = W.clock + 60
+    end
+    local hud = _G.QuestPaceLogHUD
+    hud.OnUpdate(hud, 1.5)
+    assert(not W.saw("couldn't update"), "tracker updated without an error")
+    assert(W.texts["Quest Pace Log, Achiever"], "lens title")
+    assert(W.texts["Newest"] and W.texts["1:00"] and W.texts["Middle"] and W.texts["3:00"], "newest three with live timers")
+    assert(not W.texts["Old"], "only three quests")
+    assert(W.texts["+1 more in your log"], "the rest counted")
+    assert(W.texts["Set a goal with /qpl goal 20"], "achiever lines")
+    QuestPaceLogDB.settings.lens, hud.lensAt = "competitor", nil
+    hud.OnUpdate(hud, 1.5)
+    assert(W.texts["Kills 0, 0 an hour"], "competitor lines")
+    W.cmd("hud off")
+    eq(hud.shown, false, "hidden")
+    W.cmd("hud on")
+    eq(hud.shown, true, "shown again")
+end)
+
+test("the X closes the dashboard", function()
+    local W = newWorld()
+    twoSessions(W)
+    W.cmd("show overview")
+    eq(_G.QuestPaceLogFrame.shown, true, "open")
+    _G.QuestPaceLogFrameClose.OnClick()
+    eq(_G.QuestPaceLogFrame.shown, false, "closed by the X")
+end)
+
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
 os.exit(failed == 0 and 0 or 1)

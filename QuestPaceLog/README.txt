@@ -169,6 +169,11 @@ Beating a record, finishing a level or nearing your goal says so in chat.
 Card button, or /qpl card, selects a short summary of your session in the
 window so you can copy it with Ctrl+C and post it yourself.
 
+On-screen tracker. A small panel on your screen, in combat too, with the
+top lines from your lens and your 3 newest open quests with a timer each.
+Drag it where you like, click it to open the dashboard. /qpl hud off
+hides it, /qpl hud on brings it back.
+
 Getting the report out.
 The report prints to your chat window, so you can select and copy it from
 there. The raw data is also written to your SavedVariables file,

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1, 2026-10-04
+
+- On-screen tracker, a small panel that stays up while you play, in combat too. The top follows your lens, for example an XP bar, time to the next level and your goal for an Achiever, or kills and deaths for a Competitor. The bottom lists your 3 newest open quests with a live timer, real clock time since you accepted them, and how many more are in your log. Drag to move it, click to open the dashboard, /qpl hud off hides it (`settings.hud`).
+- Fixed the dashboard's X, which handed off to the game's panel manager and did nothing. It now closes the window directly.
+- Not yet verified in the real Forever client.
+
 ## 2.0, 2026-10-04
 
 QuestPaceLog becomes a tracker for players, not only an evidence logger, with something for each of Bartle's four kinds of player. All of it is about your own character only.
