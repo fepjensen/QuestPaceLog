@@ -2388,7 +2388,7 @@ local function BuildWindow()
     end
 
     UI.Heading(ov, PAD, -476, INNER, "Time played at each level")
-    local LEVEL_BASE, LEVEL_MAX_H, LEVEL_COLS = -552, 46, 20
+    local LEVEL_BASE, LEVEL_MAX_H, LEVEL_COLS = -558, 42, 20 -- the tallest column's time stays clear of the heading line
     local levelCols = {}
     for i = 1, LEVEL_COLS do
         levelCols[i] = { bar = UI.Bar(ov, 24, LEVEL_MAX_H, GOLD, true), time = UI.Text(ov, F.small, 0, 0, "CENTER"), level = UI.Text(ov, F.small, 0, 0, "CENTER") }

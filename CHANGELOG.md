@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.1, 2026-10-05
+
+- Time played at each level sits a little lower, so the tallest column's time no longer touches the heading's line.
+
 ## 2.4, 2026-10-05
 
 - Quest timers now count only the time you played with the quest tracked. Untracking a quest pauses its clock and tracking it again resumes it. Logging out or reloading pauses every clock, so time away doesn't count, and a session that ends without a logout, after a crash or a lost connection, stops its clocks at its last activity. Each quest record keeps its clock (`activeSec`, `activeSince`), and each turn-in keeps the final count (`activeSec` on the entry). `durationSec` is unchanged, still clock time from accept to turn-in.
