@@ -3069,7 +3069,9 @@ end
 -- the quest ID the game puts on the line when it has one, else by the title
 -- text. Only the text is changed, nothing else on the game's frames.
 UI.stamped = setmetatable({}, { __mode = "k" })
-UI.TRACKER_ROOTS = { "ObjectiveTrackerFrame", "QuestWatchFrame", "WatchFrame" }
+-- The tracker as a whole, and its quest sections by name, in case a client
+-- keeps them outside the tracker's own frame.
+UI.TRACKER_ROOTS = { "ObjectiveTrackerFrame", "QuestObjectiveTracker", "CampaignQuestObjectiveTracker", "ObjectiveTrackerBlocksFrame", "QuestWatchFrame", "WatchFrame" }
 UI.LOG_ROOTS = { "QuestScrollFrame", "QuestMapFrame", "QuestLogFrame" }
 UI.QUEST_UI_HOOKS = {
     { nil, "ObjectiveTracker_Update" }, { "ObjectiveTrackerFrame", "Update" }, { "ObjectiveTrackerManager", "UpdateAll" },
@@ -3080,9 +3082,17 @@ UI.QUEST_UI_HOOKS = {
 UI.hooked = {}
 UI.found = {}
 
--- "[15] A Recipe For Death" becomes "A Recipe For Death".
+-- The text as it reads, without the color, icon and link codes the game can
+-- wrap around it. The objective tracker colors quest titles this way.
+local function PlainText(text)
+    text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", ""):gsub("|A.-|a", ""):gsub("|H.-|h(.-)|h", "%1")
+    return (text:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+-- "|cffffff00[15] A Recipe For Death|r" becomes "A Recipe For Death".
 local function TitleKey(text)
-    return text:match("^%[[^%]]*%]%s*(.-)$") or text
+    local plain = PlainText(text)
+    return plain:match("^%[[^%]]*%]%s*(.-)$") or plain
 end
 
 -- The title with the timer after it, trimmed with "..." when the timer would
@@ -3153,9 +3163,8 @@ function UI.ScanQuestUI(frame, byID, byTitle, found, depth, stats)
                     if at then table.insert(found, { r, at }) end
                     if stats then
                         stats.strings = stats.strings + 1
-                        if #stats.samples < 4 and (at or base:find("^%[")) then
-                            table.insert(stats.samples, "\"" .. base .. "\"" .. (at and " matched" or " no match"))
-                        end
+                        local list = at and stats.matched or stats.other
+                        if #list < (at and 4 or 8) then table.insert(list, "\"" .. PlainText(base) .. "\"") end
                     end
                 end
             end
@@ -3224,9 +3233,15 @@ function UI.RefreshQuestTimers(rescan)
                 end
             end
         end
+        local unique, keep = {}, {}
+        for _, pair in ipairs(found) do
+            if not keep[pair[1]] then
+                keep[pair[1]] = true
+                table.insert(unique, pair)
+            end
+        end
+        found = unique
         -- Lines that were stamped but no longer belong to an open quest go back to the game's text.
-        local keep = {}
-        for _, pair in ipairs(found) do keep[pair[1]] = true end
         for fs in pairs(UI.stamped) do if not keep[fs] then UI.Unstamp(fs) end end
         UI.found = found
     end
@@ -3284,17 +3299,19 @@ function UI.Diag()
     print("|cff33ff99[QuestPaceLog]|r Quest frames found, " .. (#have > 0 and table.concat(have, ", ") or "none") .. ".")
     print("|cff33ff99[QuestPaceLog]|r Hooks attached, " .. (#hooks > 0 and table.concat(hooks, ", ") or "none") .. ". Titles with a timer now, " .. #UI.found .. ".")
     local byID, byTitle = UI.OpenQuestTimes()
-    local n = 0
-    for _ in pairs(byID) do n = n + 1 end
-    print("|cff33ff99[QuestPaceLog]|r Tracked open quests that get a timer, " .. n .. ".")
+    local titles = {}
+    for _, rec in pairs(byID) do table.insert(titles, rec.title or "?") end
+    table.sort(titles)
+    print("|cff33ff99[QuestPaceLog]|r Tracked open quests that get a timer, " .. #titles .. (#titles > 0 and (", " .. table.concat(titles, ", ")) or "") .. ".")
     for _, list in ipairs({ UI.TRACKER_ROOTS, UI.LOG_ROOTS }) do
         for _, name in ipairs(list) do
             local root = _G[name]
             if type(root) == "table" and root.IsVisible and root:IsVisible() then
-                local stats = { frames = 0, strings = 0, samples = {} }
+                local stats = { frames = 0, strings = 0, matched = {}, other = {} }
                 local ok, err = pcall(UI.ScanQuestUI, root, byID, byTitle, {}, 0, stats)
-                print(string.format("|cff33ff99[QuestPaceLog]|r %s, %d frames, %d lines of text%s%s", name, stats.frames, stats.strings,
-                    #stats.samples > 0 and (". Titles seen, " .. table.concat(stats.samples, ", ")) or ". No quest titles seen",
+                print(string.format("|cff33ff99[QuestPaceLog]|r %s, %d frames, %d lines of text. With a timer, %s. Other lines, %s%s", name, stats.frames, stats.strings,
+                    #stats.matched > 0 and table.concat(stats.matched, ", ") or "none",
+                    #stats.other > 0 and table.concat(stats.other, ", ") or "none",
                     ok and "." or (". Error, " .. tostring(err))))
             end
         end

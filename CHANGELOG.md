@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.2, 2026-10-05
+
+- Quest timers in the objective tracker. /qpl diag showed the addon reading the tracker but recognizing no title. The tracker can wrap quest titles in color codes, so titles are now compared without the game's color, icon and link codes. The tracker's quest sections are also scanned by name, in case they sit outside the tracker's own frame.
+- /qpl diag names the quests that should get a timer, and for each quest frame shows the lines that got one and a few that didn't, as they read.
+
 ## 2.4.1, 2026-10-05
 
 - Time played at each level sits a little lower, so the tallest column's time no longer touches the heading's line.

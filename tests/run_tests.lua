@@ -1070,8 +1070,8 @@ test("/qpl diag shows the titles it saw under each quest frame", function()
     _G.ObjectiveTrackerFrame = fakeUIFrame({}, {}, { fakeUIFrame({}, { title, fakeFontString("[9] Someone Else's Quest") }) })
     tick(W)
     W.cmd("diag")
-    assert(W.saw("Tracked open quests that get a timer, 1."), "open quest count")
-    assert(W.saw("ObjectiveTrackerFrame, 2 frames, 2 lines of text. Titles seen, \"[8] Seen Quest\" matched, \"[9] Someone Else's Quest\" no match."), "titles reported")
+    assert(W.saw("Tracked open quests that get a timer, 1, Seen Quest."), "open quests named")
+    assert(W.saw("ObjectiveTrackerFrame, 2 frames, 2 lines of text. With a timer, \"[8] Seen Quest\". Other lines, \"[9] Someone Else's Quest\"."), "lines reported")
     _G.ObjectiveTrackerFrame = nil
 end)
 
@@ -1173,6 +1173,25 @@ test("quests from before 2.4 start from the time you played since accepting them
     W.clock = W.clock + 40
     hudTick()
     assert(W.texts["~9:00"], "and it runs from there")
+end)
+
+
+test("tracker titles wrapped in the game's color codes still get their timer", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(640, "Arugal's Folly", 15)
+    W.fire("QUEST_ACCEPTED", 640)
+    W.clock = W.clock + 75
+    local header = fakeFontString("|cffffff00[15] Arugal's Folly|r")
+    local block = fakeUIFrame({}, { header, fakeFontString("- 0/1 Head of Grimson") })
+    -- The quest section is found both inside the tracker and by its own name.
+    _G.QuestObjectiveTracker = fakeUIFrame({}, {}, { block })
+    _G.ObjectiveTrackerFrame = fakeUIFrame({}, {}, { _G.QuestObjectiveTracker })
+    tick(W)
+    eq(header.text, "|cffffff00[15] Arugal's Folly|r  |cffb4b4b41:15|r", "timer after the colored title, added once")
+    W.cmd("diag")
+    assert(W.saw("With a timer, \"[15] Arugal's Folly\""), "diag shows the title as it reads")
+    _G.QuestObjectiveTracker, _G.ObjectiveTrackerFrame = nil, nil
 end)
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
