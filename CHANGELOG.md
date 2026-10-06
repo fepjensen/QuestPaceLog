@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.3, 2026-10-05
+
+- Fixed quests wrongly recorded as dropped. The game's quest list leaves out quests under a collapsed zone header, and the addon read that as the quest leaving the log. On 2026-10-05 at 21:57, a level-up marked three open quests dropped this way. The addon now asks the game whether you're still on a quest (C_QuestLog.IsOnQuest), and clears a wrong `droppedAt` and `droppedLevel` when the game confirms the quest is still in your log. Real drops are still recorded.
+- Quests under a collapsed header now count in the tracker's "+N more in your log", and keep their green and gray tracking.
+- Quest timers only on tracked quests, in the map's quest log, the objective tracker and the addon's tracker. Untracking a quest parks it as backlog, so its timer is hidden, and tracking it again brings the timer back.
+- The dashboard, welcome and settings windows are parchment, like the game's quest log, with brown ink text, card-style tiles and chart colors deep enough to read on it. The game's own parchment art is used when the client has it, otherwise a warm parchment color, with darker edges like old paper.
+- The Compass graph's labels and lines were dimmed by its own background. Fixed.
+- /qpl diag now lists, for each of the game's quest frames, how many lines it looked at and the quest titles it saw, whether each got a timer, the last timer error, and which parchment the client had.
+
 ## 2.2, 2026-10-05
 
 - A welcome window explains Bartle's four types of player and lets you pick the one that sounds like you, or let your play decide. It opens by itself the first time, and /qpl type opens it again (`settings.archetype`, `settings.welcomed`). Your type sets the dashboard's first tab and the tracker's lines.

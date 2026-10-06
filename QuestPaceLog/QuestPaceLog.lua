@@ -261,13 +261,53 @@ local function QuestTracker()
     return QuestPaceLogDB.quests
 end
 
+-- Whether the game still has the quest in your log, or nil when the client
+-- can't say. The log list above skips quests under a collapsed zone header,
+-- so the game is asked directly.
+local function IsOnQuest(questID)
+    if C_QuestLog and C_QuestLog.IsOnQuest then
+        local ok, on = pcall(C_QuestLog.IsOnQuest, questID)
+        if ok then return on and true or false end
+    end
+    return nil
+end
+
+-- Whether you track the quest. Untracking parks a quest as backlog, so its
+-- timer is hidden. True when the client can't say.
+local function IsTracked(questID)
+    if C_QuestLog and C_QuestLog.GetQuestWatchType then
+        local ok, watch = pcall(C_QuestLog.GetQuestWatchType, questID)
+        if ok then return watch ~= nil end
+    end
+    if GetQuestLogIndexByID and IsQuestWatched then
+        local ok, index = pcall(GetQuestLogIndexByID, questID)
+        if ok and type(index) == "number" and index > 0 then return IsQuestWatched(index) and true or false end
+    end
+    return true
+end
+
+-- Every quest in your log. The visible ones from the log list, plus the
+-- ones the addon knows that the game says are still there, under a
+-- collapsed header.
+local function QuestsInLog()
+    local inLog = ReadQuestLog()
+    for questID, rec in pairs(QuestTracker()) do
+        if not inLog[questID] and not rec.turnedInAt and IsOnQuest(questID) then
+            inLog[questID] = { title = rec.title, level = rec.questLevel }
+        end
+    end
+    return inLog
+end
+
 -- Walk the log and note, for every quest in it, the first moment it turned
 -- green and the first moment it turned gray. A quest the tracker knew about
 -- that's no longer in the log and was never turned in gets marked dropped.
 local function ScanQuestDifficulty(playerLevel)
+    local atLoad = playerLevel == nil -- login and reload pass no level, level-ups do
     playerLevel = playerLevel or UnitLevel("player")
     local tracker = QuestTracker()
-    local inLog = ReadQuestLog()
+    local visible = ReadQuestLog()
+    local inLog = QuestsInLog()
     local now = time()
     for questID, q in pairs(inLog) do
         local rec = tracker[questID]
@@ -276,6 +316,8 @@ local function ScanQuestDifficulty(playerLevel)
             rec = { title = q.title, questLevel = q.level, firstSeenAt = now, firstSeenLevel = playerLevel, predatesTracking = true }
             tracker[questID] = rec
         end
+        -- Before 2.3 a quest under a collapsed header looked dropped. It never left the log.
+        if rec.droppedAt and not rec.turnedInAt then rec.droppedAt, rec.droppedLevel = nil, nil end
         rec.questLevel = rec.questLevel or q.level
         local color = DifficultyOf(rec.questLevel, playerLevel)
         if (color == "green" or color == "gray") and not rec.greenAt then
@@ -286,8 +328,10 @@ local function ScanQuestDifficulty(playerLevel)
             print(string.format("|cff33ff99[QuestPaceLog]|r \"%s\" is now gray for you (quest level %d, you're %d).", rec.title or "?", rec.questLevel or 0, playerLevel))
         end
     end
+    -- At login an empty read is the log not loaded yet, not every quest abandoned at once.
+    if atLoad and next(visible) == nil then return end
     for questID, rec in pairs(tracker) do
-        if not inLog[questID] and not rec.turnedInAt and not rec.droppedAt then
+        if not inLog[questID] and not rec.turnedInAt and not rec.droppedAt and IsOnQuest(questID) ~= true then
             rec.droppedAt, rec.droppedLevel = now, playerLevel
         end
     end
@@ -1562,10 +1606,11 @@ local function Thousands(n)
     return (out:gsub("^,", ""))
 end
 
+-- The dashboard is parchment, so its chart colors are deep, like ink on the quest log.
 local QUEST_COLORS = {
-    { "red", 1, 0.1, 0.1 }, { "orange", 1, 0.5, 0.25 }, { "yellow", 1, 1, 0 }, { "green", 0.25, 0.75, 0.25 }, { "gray", 0.5, 0.5, 0.5 },
+    { "red", 0.74, 0.12, 0.08 }, { "orange", 0.86, 0.42, 0.06 }, { "yellow", 0.82, 0.62, 0.02 }, { "green", 0.22, 0.52, 0.14 }, { "gray", 0.52, 0.48, 0.42 },
 }
-local GOLD, SLATE, VIOLET = { 1, 0.82, 0 }, { 0.42, 0.45, 0.52 }, { 0.62, 0.45, 1 }
+local GOLD, SLATE, VIOLET = { 0.78, 0.52, 0.04 }, { 0.50, 0.44, 0.36 }, { 0.46, 0.28, 0.62 }
 local WIN_W, WIN_H, PAD = 800, 820, 16
 local INNER = WIN_W - PAD * 2
 local BAR_LEFT, BAR_MAX = 300, 260
@@ -1625,8 +1670,8 @@ local function CompassScores(s, st)
 end
 
 local LENS_COLOR = {
-    achiever = { 1, 0.82, 0 }, explorer = { 0.3, 0.78, 0.7 }, socializer = { 0.62, 0.45, 1 },
-    competitor = { 0.9, 0.35, 0.3 }, compass = { 0.75, 0.75, 0.8 },
+    achiever = { 0.78, 0.52, 0.04 }, explorer = { 0.12, 0.48, 0.42 }, socializer = { 0.46, 0.28, 0.62 },
+    competitor = { 0.70, 0.16, 0.10 }, compass = { 0.45, 0.36, 0.26 },
 }
 
 local function Pct(part, whole) return whole > 0 and math.floor(part / whole * 100 + 0.5) or 0 end
@@ -1812,19 +1857,107 @@ local function Archetype()
     return (a and UI.TYPES[a]) and a or nil
 end
 
-function UI.Backdrop(f, alpha)
+-- Ink on parchment. Body text, headings, soft labels, and the brown of
+-- card borders and dividers.
+UI.INK, UI.INK_HEAD, UI.INK_SOFT, UI.EDGE = { 0.22, 0.13, 0.05 }, { 0.38, 0.15, 0.03 }, { 0.44, 0.33, 0.20 }, { 0.45, 0.31, 0.16 }
+
+-- "card" is a slightly darker patch of parchment with a brown border, for
+-- tiles and panels. Anything else is the dark tooltip look.
+function UI.Backdrop(f, style)
     if not f.SetBackdrop then return end
+    if style == "card" then
+        f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = false, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
+        f:SetBackdropColor(0.42, 0.28, 0.12, 0.12)
+        f:SetBackdropBorderColor(UI.EDGE[1], UI.EDGE[2], UI.EDGE[3], 1)
+        return
+    end
     f:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
         tile = true, tileSize = 16, edgeSize = 14, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
-    f:SetBackdropColor(0.06, 0.06, 0.08, alpha or 0.9)
+    f:SetBackdropColor(0.06, 0.06, 0.08, 0.9)
     f:SetBackdropBorderColor(0.55, 0.55, 0.6, 1)
 end
 
--- A dark panel with the tooltip's border.
-function UI.Panel(parent, name, kind)
+function UI.Panel(parent, name, kind, style)
     local f = TryCreate(kind or "Frame", name, parent, "BackdropTemplate")
-    UI.Backdrop(f)
+    UI.Backdrop(f, style)
     return f
+end
+
+-- The game's fonts as brown ink with no shadow, the way the quest log
+-- prints on parchment. Falls back to the game's own fonts.
+function UI.Fonts()
+    if UI.F then return UI.F end
+    local specs = {
+        body = { "GameFontHighlightSmall", UI.INK }, bodyMed = { "GameFontHighlight", UI.INK },
+        heading = { "GameFontNormal", UI.INK_HEAD }, large = { "GameFontNormalLarge", UI.INK_HEAD },
+        value = { "GameFontHighlightLarge", UI.INK }, label = { "GameFontNormalSmall", UI.INK_SOFT },
+    }
+    UI.F = {}
+    for key, spec in pairs(specs) do
+        local name = "QuestPaceLogFont_" .. key
+        local ok = CreateFont and pcall(function()
+            local font = _G[name] or CreateFont(name)
+            local base = _G[spec[1]]
+            if base then
+                if font.CopyFontObject then font:CopyFontObject(base) else font:SetFontObject(base) end
+            end
+            font:SetTextColor(spec[2][1], spec[2][2], spec[2][3])
+            font:SetShadowOffset(0, 0)
+        end)
+        UI.F[key] = ok and name or spec[1]
+    end
+    return UI.F
+end
+
+-- A color that fades from a1 to a2 across the texture, bottom to top or left to right.
+function UI.Gradient(t, orientation, c, a1, a2)
+    t:SetColorTexture(1, 1, 1, 1)
+    if CreateColor and t.SetGradient and pcall(t.SetGradient, t, orientation, CreateColor(c[1], c[2], c[3], a1), CreateColor(c[1], c[2], c[3], a2)) then return end
+    if t.SetGradientAlpha and pcall(t.SetGradientAlpha, t, orientation, c[1], c[2], c[3], a1, c[1], c[2], c[3], a2) then return end
+    t:SetColorTexture(c[1], c[2], c[3], (a1 + a2) / 2)
+end
+
+-- Parchment over the template's dark inner background, the area below the
+-- title and portrait. The game's own parchment textures first. A texture
+-- this client doesn't have gives no file or atlas, so the next is tried,
+-- and a warm parchment color is always underneath. Darker edges, like old paper.
+UI.PARCHMENTS = {
+    { atlas = "QuestBG-Parchment" }, { atlas = "questlog-parchment" }, { atlas = "UI-Frame-Parchment" },
+    { file = "Interface\\AchievementFrame\\UI-Achievement-Parchment-Horizontal" },
+    { file = "Interface\\Stationery\\StationeryTest1" },
+}
+function UI.Parchment(frame)
+    local base = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
+    base:SetPoint("TOPLEFT", 4, -60)
+    base:SetPoint("BOTTOMRIGHT", -6, 26)
+    base:SetColorTexture(0.86, 0.77, 0.58, 1)
+    local art = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
+    art:SetAllPoints(base)
+    local used = "color"
+    for _, c in ipairs(UI.PARCHMENTS) do
+        if c.atlas and C_Texture and C_Texture.GetAtlasInfo and art.SetAtlas then
+            local ok, info = pcall(C_Texture.GetAtlasInfo, c.atlas)
+            if ok and info and pcall(art.SetAtlas, art, c.atlas) then used = c.atlas break end
+        elseif c.file then
+            art:SetTexture(c.file)
+            local id = art.GetTextureFileID and art:GetTextureFileID()
+            if type(id) == "number" and id > 0 then used = c.file break end
+        end
+    end
+    if used == "color" then art:Hide() end
+    local shade = { 0.30, 0.18, 0.06 }
+    for _, e in ipairs({
+        { "TOPLEFT", "TOPRIGHT", nil, 36, "VERTICAL", 0, 0.26 }, { "BOTTOMLEFT", "BOTTOMRIGHT", nil, 36, "VERTICAL", 0.26, 0 },
+        { "TOPLEFT", "BOTTOMLEFT", 36, nil, "HORIZONTAL", 0.22, 0 }, { "TOPRIGHT", "BOTTOMRIGHT", 36, nil, "HORIZONTAL", 0, 0.22 },
+    }) do
+        local t = frame:CreateTexture(nil, "BACKGROUND", nil, -6)
+        t:SetPoint(e[1], base, e[1])
+        t:SetPoint(e[2], base, e[2])
+        if e[3] then t:SetWidth(e[3]) else t:SetHeight(e[4]) end
+        UI.Gradient(t, e[5], shade, e[6], e[7])
+    end
+    UI.parchmentSource = used
 end
 
 function UI.Text(parent, template, x, y, point, width)
@@ -1838,15 +1971,16 @@ function UI.Text(parent, template, x, y, point, width)
 end
 
 function UI.Heading(parent, x, y, width, label)
-    UI.Text(parent, "GameFontNormal", x, y):SetText(label)
+    UI.Text(parent, UI.Fonts().heading, x, y):SetText(label)
     local line = parent:CreateTexture(nil, "ARTWORK")
     line:SetPoint("TOPLEFT", x, y - 16)
     line:SetSize(width, 1)
-    line:SetColorTexture(1, 0.82, 0, 0.3)
+    line:SetColorTexture(UI.EDGE[1], UI.EDGE[2], UI.EDGE[3], 0.6)
 end
 
--- A status bar with the game's own bar texture, 0 to 1.
-function UI.Bar(parent, w, h, c, vertical)
+-- A status bar with the game's own bar texture, 0 to 1. The empty part is a
+-- faint brown on parchment, or the track color given.
+function UI.Bar(parent, w, h, c, vertical, track)
     local b = CreateFrame("StatusBar", nil, parent)
     b:SetSize(w, h)
     b:SetStatusBarTexture(UI.STATUSBAR)
@@ -1856,7 +1990,8 @@ function UI.Bar(parent, w, h, c, vertical)
     b:SetStatusBarColor(c[1], c[2], c[3], c[4] or 1)
     local bg = b:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    bg:SetColorTexture(1, 1, 1, 0.08)
+    track = track or { 0.30, 0.20, 0.10, 0.16 }
+    bg:SetColorTexture(track[1], track[2], track[3], track[4])
     return b
 end
 
@@ -1869,6 +2004,7 @@ end
 
 -- A window like the game's own, with a portrait, a title and a close button.
 function UI.Window(name, title, w, h, icon)
+    UI.Fonts()
     local f, styled
     for _, template in ipairs({ "ButtonFrameTemplate", "PortraitFrameTemplate", "BasicFrameTemplateWithInset" }) do
         local ok, x = pcall(CreateFrame, "Frame", name, UIParent, template)
@@ -1913,6 +2049,7 @@ function UI.Window(name, title, w, h, icon)
     f.content:SetAllPoints()
     local level = f.GetFrameLevel and f:GetFrameLevel()
     if type(level) == "number" then f.content:SetFrameLevel(level + 4) end
+    UI.Parchment(f.content)
     f:SetScript("OnShow", function() if PlaySound and SOUNDKIT then pcall(PlaySound, SOUNDKIT.IG_CHARACTER_INFO_OPEN) end end)
     f:SetScript("OnHide", function() if PlaySound and SOUNDKIT then pcall(PlaySound, SOUNDKIT.IG_CHARACTER_INFO_CLOSE) end end)
     return f
@@ -1969,7 +2106,7 @@ function UI.Check(parent, name, label, x, y, get, set)
     local cb = TryCreate("CheckButton", name, parent, "UICheckButtonTemplate")
     cb:SetSize(24, 24)
     cb:SetPoint("TOPLEFT", x, y)
-    UI.Text(parent, "GameFontHighlightSmall", x + 26, y - 6):SetText(label)
+    UI.Text(parent, UI.Fonts().body, x + 26, y - 6):SetText(label)
     cb.Refresh = function() cb:SetChecked(get() and true or false) end
     cb:SetScript("OnClick", function(self) set(self:GetChecked() and true or false) end)
     cb.Refresh()
@@ -2025,6 +2162,7 @@ local function BuildWindow()
 
     -- Overview widgets live in ov and lens widgets in lv, so each view hides as a whole.
     local c = f.content
+    local F = UI.Fonts()
     local ov, lv = CreateFrame("Frame", nil, c), CreateFrame("Frame", nil, c)
     ov:SetAllPoints()
     lv:SetAllPoints()
@@ -2049,21 +2187,21 @@ local function BuildWindow()
         f.Show_(f.allTime, LENSES[i][1])
     end)
 
-    -- Five tiles in tooltip-style panels.
+    -- Five tiles, cards on the parchment.
     local tiles, tileW = {}, (INNER - 4 * 8) / 5
     for i = 1, 5 do
         local x = PAD + (i - 1) * (tileW + 8)
-        local panel = UI.Panel(c)
-        panel:SetPoint("TOPLEFT", x, -62)
-        panel:SetSize(tileW, 58)
-        tiles[i] = { value = UI.Text(panel, "GameFontHighlightLarge", 10, -10), label = UI.Text(panel, "GameFontNormalSmall", 10, -36, "TOPLEFT", tileW - 16) }
+        local panel = UI.Panel(c, nil, nil, "card")
+        panel:SetPoint("TOPLEFT", x, -66)
+        panel:SetSize(tileW, 56)
+        tiles[i] = { value = UI.Text(panel, F.value, 10, -9), label = UI.Text(panel, F.label, 10, -35, "TOPLEFT", tileW - 16) }
     end
 
     -- Overview. Donuts, recent quests and the time at each level.
     UI.Heading(ov, PAD, -132, INNER, "Where your XP, quest colors and turn-ins come from")
     local function donut(cx, cy, title)
         local d = { dots = {} }
-        UI.Text(ov, "GameFontNormalSmall", cx, cy + DONUT_R + 24, "CENTER"):SetText(title)
+        UI.Text(ov, F.label, cx, cy + DONUT_R + 24, "CENTER"):SetText(title)
         local seg = 2 * math.pi * DONUT_R / DONUT_DOTS + 1.5
         for i = 1, DONUT_DOTS do
             local angle = math.pi / 2 - (i - 0.5) / DONUT_DOTS * 2 * math.pi
@@ -2073,8 +2211,8 @@ local function BuildWindow()
             if t.SetRotation then pcall(t.SetRotation, t, angle - math.pi / 2) end
             d.dots[i] = t
         end
-        d.center = UI.Text(ov, "GameFontHighlightLarge", cx, cy, "CENTER")
-        d.legend = UI.Text(ov, "GameFontHighlightSmall", cx + DONUT_R + 22, cy + 20)
+        d.center = UI.Text(ov, F.value, cx, cy, "CENTER")
+        d.legend = UI.Text(ov, F.body, cx + DONUT_R + 22, cy + 20)
         d.legend:SetJustifyH("LEFT")
         return d
     end
@@ -2097,7 +2235,9 @@ local function BuildWindow()
         local lines = {}
         for _, p in ipairs(parts) do
             if p[1] > 0 then
-                table.insert(lines, string.format("|cff%02x%02x%02x%s|r %s", math.floor(p[2][1] * 255), math.floor(p[2][2] * 255), math.floor(p[2][3] * 255), Thousands(p[1]), p[3]))
+                -- A small square in the series color, then the number and label in ink.
+                table.insert(lines, string.format("|TInterface\\Buttons\\WHITE8X8:10:10:0:0:8:8:0:8:0:8:%d:%d:%d|t %s %s",
+                    math.floor(p[2][1] * 255), math.floor(p[2][2] * 255), math.floor(p[2][3] * 255), Thousands(p[1]), p[3]))
             end
         end
         if #lines > 0 and extra then table.insert(lines, extra) end
@@ -2115,9 +2255,9 @@ local function BuildWindow()
     for i = 1, 8 do
         local y = -310 - (i - 1) * 20
         local row = {
-            name = UI.Text(ov, "GameFontHighlightSmall", PAD, y, "TOPLEFT", BAR_LEFT - PAD - 10),
+            name = UI.Text(ov, F.body, PAD, y, "TOPLEFT", BAR_LEFT - PAD - 10),
             bar = UI.Bar(ov, BAR_MAX, 12, { 0.3, 0.6, 1 }),
-            info = UI.Text(ov, "GameFontHighlightSmall", BAR_LEFT + BAR_MAX + 8, y),
+            info = UI.Text(ov, F.body, BAR_LEFT + BAR_MAX + 8, y),
         }
         if row.name.SetWordWrap then row.name:SetWordWrap(false) end
         row.bar:SetPoint("TOPLEFT", BAR_LEFT, y - 1)
@@ -2154,68 +2294,74 @@ local function BuildWindow()
     local LEVEL_BASE, LEVEL_MAX_H, LEVEL_COLS = -552, 46, 20
     local levelCols = {}
     for i = 1, LEVEL_COLS do
-        levelCols[i] = { bar = UI.Bar(ov, 24, LEVEL_MAX_H, GOLD, true), time = UI.Text(ov, "GameFontHighlightSmall", 0, 0, "CENTER"), level = UI.Text(ov, "GameFontNormalSmall", 0, 0, "CENTER") }
+        levelCols[i] = { bar = UI.Bar(ov, 24, LEVEL_MAX_H, GOLD, true), time = UI.Text(ov, F.body, 0, 0, "CENTER"), level = UI.Text(ov, F.label, 0, 0, "CENTER") }
     end
-    local levelNote = UI.Text(ov, "GameFontHighlightSmall", -PAD, -478, "TOPRIGHT")
+    local levelNote = UI.Text(ov, F.label, -PAD, -478, "TOPRIGHT")
 
     -- Lens views. A heading, twelve rows of bars, a note, the Compass graph
     -- and, on the Compass, a suggestion when your play leans another way.
-    local lensTitle = UI.Text(lv, "GameFontNormal", PAD, -132)
+    local lensTitle = UI.Text(lv, F.heading, PAD, -132)
     local lensLine = lv:CreateTexture(nil, "ARTWORK")
     lensLine:SetPoint("TOPLEFT", PAD, -148)
     lensLine:SetSize(INNER, 1)
-    lensLine:SetColorTexture(1, 0.82, 0, 0.3)
+    lensLine:SetColorTexture(UI.EDGE[1], UI.EDGE[2], UI.EDGE[3], 0.6)
     local lensRows = {}
     for i = 1, 12 do
-        local row = { name = UI.Text(lv, "GameFontHighlightSmall", PAD, 0), bar = UI.Bar(lv, 280, 12, GOLD), info = UI.Text(lv, "GameFontHighlightSmall", PAD, 0) }
+        local row = { name = UI.Text(lv, F.body, PAD, 0), bar = UI.Bar(lv, 280, 12, GOLD), info = UI.Text(lv, F.body, PAD, 0) }
         row.name:SetJustifyH("LEFT")
         if row.name.SetWordWrap then row.name:SetWordWrap(false) end
         lensRows[i] = row
     end
-    local lensNote = UI.Text(lv, "GameFontHighlightSmall", PAD, -440, "TOPLEFT", INNER)
+    local lensNote = UI.Text(lv, F.body, PAD, -440, "TOPLEFT", INNER)
     -- Bartle's graph. Acting up, interacting down, players left, world right.
     local CX, CY, HALF = PAD + 120, -290, 110
+    -- Drawn as textures on the lens layer itself, so nothing covers its labels.
     local compass = {}
-    local square = UI.Panel(lv)
+    local square = lv:CreateTexture(nil, "BACKGROUND")
     square:SetPoint("TOPLEFT", CX - HALF, CY + HALF)
     square:SetSize(2 * HALF, 2 * HALF)
+    square:SetColorTexture(0.42, 0.28, 0.12, 0.10)
     table.insert(compass, square)
-    for _, line in ipairs({ { CX - HALF, CY + 1, 2 * HALF, 1 }, { CX, CY + HALF, 1, 2 * HALF } }) do
-        local t = lv:CreateTexture(nil, "OVERLAY")
+    for _, line in ipairs({
+        { CX - HALF, CY + 1, 2 * HALF, 1, 0.5 }, { CX, CY + HALF, 1, 2 * HALF, 0.5 },
+        { CX - HALF, CY + HALF, 2 * HALF, 1, 1 }, { CX - HALF, CY - HALF + 1, 2 * HALF, 1, 1 },
+        { CX - HALF, CY + HALF, 1, 2 * HALF, 1 }, { CX + HALF - 1, CY + HALF, 1, 2 * HALF, 1 },
+    }) do
+        local t = lv:CreateTexture(nil, "ARTWORK")
         t:SetPoint("TOPLEFT", line[1], line[2])
         t:SetSize(line[3], line[4])
-        t:SetColorTexture(1, 0.82, 0, 0.35)
+        t:SetColorTexture(UI.EDGE[1], UI.EDGE[2], UI.EDGE[3], line[5])
         table.insert(compass, t)
     end
     local quadLabels = {}
     for _, q in ipairs({ { "competitor", -HALF / 2, HALF - 14 }, { "achiever", HALF / 2, HALF - 14 }, { "socializer", -HALF / 2, -HALF + 14 }, { "explorer", HALF / 2, -HALF + 14 } }) do
-        local t = UI.Text(lv, "GameFontNormalSmall", CX + q[2], CY + q[3], "CENTER")
+        local t = UI.Text(lv, F.heading, CX + q[2], CY + q[3], "CENTER")
         t:SetText(UI.TYPES[q[1]].name)
         quadLabels[q[1]] = t
         table.insert(compass, t)
     end
     for _, a in ipairs({ { "acting", 0, HALF + 10 }, { "interacting", 0, -HALF - 10 }, { "players", -HALF - 26, 0 }, { "world", HALF + 22, 0 } }) do
-        local t = UI.Text(lv, "GameFontHighlightSmall", CX + a[2], CY + a[3], "CENTER")
+        local t = UI.Text(lv, F.label, CX + a[2], CY + a[3], "CENTER")
         t:SetText(a[1])
         table.insert(compass, t)
     end
     local dot = lv:CreateTexture(nil, "OVERLAY")
     dot:SetSize(12, 12)
-    dot:SetColorTexture(1, 1, 1, 1)
+    dot:SetColorTexture(0.62, 0.10, 0.05, 1)
     table.insert(compass, dot)
-    local banner = UI.Panel(lv)
+    local banner = UI.Panel(lv, nil, nil, "card")
     banner:SetPoint("TOPLEFT", PAD, -432)
     banner:SetSize(INNER, 62)
-    local bannerText = UI.Text(banner, "GameFontHighlight", 12, -10, "TOPLEFT", INNER - 24)
+    local bannerText = UI.Text(banner, F.bodyMed, 12, -10, "TOPLEFT", INNER - 24)
     local switchButton = UI.Button(banner, "QuestPaceLogSwitchType", "Switch", 180)
     switchButton:SetPoint("BOTTOMLEFT", 10, 6)
     local keepButton = UI.Button(banner, "QuestPaceLogKeepType", "Keep", 180)
     keepButton:SetPoint("LEFT", switchButton, "RIGHT", 6, 0)
     banner:Hide()
 
-    -- The full report, in a dark panel you can scroll, select and copy from.
+    -- The full report, in a card you can scroll, select and copy from.
     UI.Heading(c, PAD, -580, INNER, "Full report")
-    local reportPanel = UI.Panel(c)
+    local reportPanel = UI.Panel(c, nil, nil, "card")
     reportPanel:SetPoint("TOPLEFT", PAD, -602)
     reportPanel:SetPoint("BOTTOMRIGHT", -PAD, 30)
     local scroll = TryCreate("ScrollFrame", nil, reportPanel, "UIPanelScrollFrameTemplate")
@@ -2224,7 +2370,8 @@ local function BuildWindow()
     local report = CreateFrame("EditBox", nil, scroll)
     report:SetMultiLine(true)
     report:SetAutoFocus(false)
-    report:SetFontObject("GameFontHighlightSmall")
+    report:SetFontObject(F.body)
+    report:SetTextColor(UI.INK[1], UI.INK[2], UI.INK[3])
     report:SetWidth(INNER - 44)
     report:SetScript("OnEscapePressed", function() f:Hide() end)
     scroll:SetScrollChild(report)
@@ -2315,7 +2462,8 @@ local function BuildWindow()
         for _, w in ipairs(compass) do if isCompass then w:Show() else w:Hide() end end
         local mine = Archetype()
         for key, label in pairs(quadLabels) do
-            if key == mine then label:SetTextColor(1, 0.82, 0) else label:SetTextColor(1, 1, 1) end
+            local ink = key == mine and UI.INK_HEAD or UI.INK_SOFT
+            label:SetTextColor(ink[1], ink[2], ink[3])
         end
         -- On the Compass the list sits right of the graph, elsewhere it spans the window.
         local left = isCompass and (PAD + 2 * HALF + 70) or PAD
@@ -2441,7 +2589,7 @@ function UI.BuildWelcome()
     local f = UI.Window("QuestPaceLogWelcome", "Welcome to Quest Pace Log", 720, 540, UI.ICONS.overview)
     local c = f.content
     UI.Text(c, "GameFontNormalLarge", 72, -34):SetText("What kind of player are you?")
-    UI.Text(c, "GameFontHighlight", 24, -72, "TOPLEFT", 672):SetText("Players enjoy games for different reasons. The game designer Richard Bartle sorted them into four kinds. "
+    UI.Text(c, UI.Fonts().bodyMed, 24, -72, "TOPLEFT", 672):SetText("Players enjoy games for different reasons. The game designer Richard Bartle sorted them into four kinds. "
         .. "Pick the one that sounds most like you. It decides what your dashboard and on-screen tracker show first. "
         .. "You can change it any time, and the Compass will tell you if the way you play says otherwise.")
     local cards = {}
@@ -2451,14 +2599,14 @@ function UI.BuildWelcome()
         f.selected = i
         for j, card in ipairs(cards) do
             if card.SetBackdropBorderColor then
-                if j == i then card:SetBackdropBorderColor(1, 0.82, 0, 1) else card:SetBackdropBorderColor(0.55, 0.55, 0.6, 1) end
+                if j == i then card:SetBackdropBorderColor(0.62, 0.12, 0.05, 1) else card:SetBackdropBorderColor(UI.EDGE[1], UI.EDGE[2], UI.EDGE[3], 1) end
             end
         end
         choose:SetText("Choose " .. UI.TYPES[i].name)
     end
     for i, t in ipairs(UI.TYPES) do
         local col, row = (i - 1) % 2, math.floor((i - 1) / 2)
-        local card = UI.Panel(c, "QuestPaceLogWelcomeCard" .. i, "Button")
+        local card = UI.Panel(c, "QuestPaceLogWelcomeCard" .. i, "Button", "card")
         card:SetPoint("TOPLEFT", 24 + col * 340, -138 - row * 168)
         card:SetSize(330, 158)
         if card.SetHighlightTexture then card:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD") end
@@ -2466,10 +2614,11 @@ function UI.BuildWelcome()
         icon:SetSize(40, 40)
         icon:SetPoint("TOPLEFT", 12, -12)
         icon:SetTexture(t.icon)
-        UI.Text(card, "GameFontNormalLarge", 62, -14):SetText(t.name)
-        UI.Text(card, "GameFontHighlight", 62, -36, "TOPLEFT", 256):SetText(t.motto)
-        UI.Text(card, "GameFontHighlightSmall", 12, -64, "TOPLEFT", 306):SetText(t.about)
-        UI.Text(card, "GameFontNormalSmall", 12, -110, "TOPLEFT", 306):SetText("You'll see " .. t.shows)
+        local F = UI.Fonts()
+        UI.Text(card, F.large, 62, -14):SetText(t.name)
+        UI.Text(card, F.bodyMed, 62, -36, "TOPLEFT", 256):SetText(t.motto)
+        UI.Text(card, F.body, 12, -64, "TOPLEFT", 306):SetText(t.about)
+        UI.Text(card, F.label, 12, -110, "TOPLEFT", 306):SetText("You'll see " .. t.shows)
         card:SetScript("OnClick", function() select(i) end)
         card:SetScript("OnDoubleClick", function() UI.SetArchetype(t.key) end)
         cards[i] = card
@@ -2578,14 +2727,15 @@ UI.HUD_TEXT = {
     end,
 }
 
--- Your open quests with an accept time, newest first, and how many others are open.
+-- Your tracked open quests with an accept time, newest first, and how many
+-- quests are in your log in all. Untracked quests are parked, so they don't tick.
 local function HUDQuests()
-    local inLog, timed, total = ReadQuestLog(), {}, 0
+    local inLog, timed, total = QuestsInLog(), {}, 0
     local tracker = QuestTracker()
     for id in pairs(inLog) do
         total = total + 1
         local rec = tracker[id]
-        if rec and rec.acceptedAt and not rec.turnedInAt then table.insert(timed, { title = rec.title or inLog[id].title, at = rec.acceptedAt }) end
+        if rec and rec.acceptedAt and not rec.turnedInAt and IsTracked(id) then table.insert(timed, { title = rec.title or inLog[id].title, at = rec.acceptedAt }) end
     end
     table.sort(timed, function(a, b) return a.at > b.at end)
     return timed, total
@@ -2623,7 +2773,7 @@ local hudOk, hudErr = pcall(function()
         Settings().hudCollapsed = not Settings().hudCollapsed
         hud.Refresh()
     end)
-    hud.bar = UI.Bar(hud, UI.HUD_W - 12, 12, { 0.58, 0.36, 0.86 })
+    hud.bar = UI.Bar(hud, UI.HUD_W - 12, 12, { 0.58, 0.36, 0.86 }, false, { 1, 1, 1, 0.12 })
     hud.barText = hud.bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     hud.barText:SetPoint("CENTER")
     hud.lines = {}
@@ -2792,7 +2942,7 @@ function UI.BuildOptions()
     UI.Heading(f, 20, -434, 520, "Messages")
     table.insert(checks, UI.Check(f, "QuestPaceLogOptionsCheer", "Cheer in chat when I beat a record, finish a level or near my goal", 20, -456,
         function() return Settings().cheer ~= false end, function(v) Settings().cheer = v end))
-    UI.Text(f, "GameFontDisableSmall", 20, -494, "TOPLEFT", 520):SetText("Right-click the tracker or type /qpl options to open this window.")
+    UI.Text(f, UI.Fonts().label, 20, -494, "TOPLEFT", 520):SetText("Right-click the tracker or type /qpl options to open this window.")
 
     function w.Refresh()
         local mine = Archetype()
@@ -2876,8 +3026,10 @@ function UI.Unstamp(fs)
 end
 
 -- Collects { fontString, acceptedAt } for every quest title under a frame.
-function UI.ScanQuestUI(frame, byID, byTitle, found, depth)
+-- stats, for /qpl diag, counts what was looked at and keeps a few titles.
+function UI.ScanQuestUI(frame, byID, byTitle, found, depth, stats)
     if depth > 14 or type(frame) ~= "table" then return end
+    if stats then stats.frames = stats.frames + 1 end
     local handled = {}
     local qid = frame.questID
     if type(qid) == "number" and byID[qid] then
@@ -2897,12 +3049,18 @@ function UI.ScanQuestUI(frame, byID, byTitle, found, depth)
                     local base = (mark and cur == mark.shown) and mark.base or cur
                     local at = byTitle[TitleKey(base)]
                     if at then table.insert(found, { r, at }) end
+                    if stats then
+                        stats.strings = stats.strings + 1
+                        if #stats.samples < 4 and (at or base:find("^%[")) then
+                            table.insert(stats.samples, "\"" .. base .. "\"" .. (at and " matched" or " no match"))
+                        end
+                    end
                 end
             end
         end
     end
     if frame.GetChildren then
-        for _, child in ipairs({ frame:GetChildren() }) do UI.ScanQuestUI(child, byID, byTitle, found, depth + 1) end
+        for _, child in ipairs({ frame:GetChildren() }) do UI.ScanQuestUI(child, byID, byTitle, found, depth + 1, stats) end
     end
 end
 
@@ -2931,16 +3089,24 @@ function UI.OnQuestUIUpdate()
     end
 end
 
+-- Accept times of the quests that get a timer, by quest ID and by title.
+-- Tracked quests still in your log. Untracked ones are parked as backlog.
+function UI.OpenQuestTimes()
+    local byID, byTitle = {}, {}
+    for id, rec in pairs(QuestTracker()) do
+        local on = IsOnQuest(id)
+        if rec.acceptedAt and not rec.turnedInAt and (on or (on == nil and not rec.droppedAt)) and IsTracked(id) then
+            byID[id] = rec.acceptedAt
+            if rec.title and (not byTitle[rec.title] or rec.acceptedAt > byTitle[rec.title]) then byTitle[rec.title] = rec.acceptedAt end
+        end
+    end
+    return byID, byTitle
+end
+
 -- rescan finds the titles again, otherwise only the timers already found tick.
 function UI.RefreshQuestTimers(rescan)
     if rescan then
-        local byID, byTitle = {}, {}
-        for id, rec in pairs(QuestTracker()) do
-            if rec.acceptedAt and not rec.turnedInAt and not rec.droppedAt then
-                byID[id] = rec.acceptedAt
-                if rec.title and (not byTitle[rec.title] or rec.acceptedAt > byTitle[rec.title]) then byTitle[rec.title] = rec.acceptedAt end
-            end
-        end
+        local byID, byTitle = UI.OpenQuestTimes()
         local found = {}
         local logDone = false
         for _, group in ipairs({ { UI.TRACKER_ROOTS, Settings().timersInTracker ~= false }, { UI.LOG_ROOTS, Settings().timersInLog ~= false } }) do
@@ -2990,6 +3156,7 @@ local tickOk, tickErr = pcall(function()
         if ticks % 10 == 1 then UI.AttachQuestUIHooks() end
         local ok, err = pcall(UI.RefreshQuestTimers, UI.dirty or ticks % 5 == 1)
         UI.dirty = false
+        if not ok then UI.timersError = tostring(err) end
         if not ok and not UI.timersWarned then
             UI.timersWarned = true
             print("|cff33ff99[QuestPaceLog]|r Quest timers in the game's quest log couldn't update, " .. tostring(err) .. ". The settings window can turn them off.")
@@ -3013,6 +3180,24 @@ function UI.Diag()
     for i, h in ipairs(UI.QUEST_UI_HOOKS) do if UI.hooked[i] then table.insert(hooks, (h[1] and (h[1] .. ".") or "") .. h[2]) end end
     print("|cff33ff99[QuestPaceLog]|r Quest frames found, " .. (#have > 0 and table.concat(have, ", ") or "none") .. ".")
     print("|cff33ff99[QuestPaceLog]|r Hooks attached, " .. (#hooks > 0 and table.concat(hooks, ", ") or "none") .. ". Titles with a timer now, " .. #UI.found .. ".")
+    local byID, byTitle = UI.OpenQuestTimes()
+    local n = 0
+    for _ in pairs(byID) do n = n + 1 end
+    print("|cff33ff99[QuestPaceLog]|r Tracked open quests that get a timer, " .. n .. ".")
+    for _, list in ipairs({ UI.TRACKER_ROOTS, UI.LOG_ROOTS }) do
+        for _, name in ipairs(list) do
+            local root = _G[name]
+            if type(root) == "table" and root.IsVisible and root:IsVisible() then
+                local stats = { frames = 0, strings = 0, samples = {} }
+                local ok, err = pcall(UI.ScanQuestUI, root, byID, byTitle, {}, 0, stats)
+                print(string.format("|cff33ff99[QuestPaceLog]|r %s, %d frames, %d lines of text%s%s", name, stats.frames, stats.strings,
+                    #stats.samples > 0 and (". Titles seen, " .. table.concat(stats.samples, ", ")) or ". No quest titles seen",
+                    ok and "." or (". Error, " .. tostring(err))))
+            end
+        end
+    end
+    if UI.timersError then print("|cff33ff99[QuestPaceLog]|r Last timer error, " .. UI.timersError .. ".") end
+    if UI.parchmentSource then print("|cff33ff99[QuestPaceLog]|r Parchment, " .. UI.parchmentSource .. ".") end
 end
 
 -- A round button on the minimap's edge, like the game's own. Click for the

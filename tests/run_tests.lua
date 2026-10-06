@@ -13,7 +13,7 @@ local passed, failed = 0, 0
 -- opts.db  = existing SavedVariables table to start from, or nil
 local function newWorld(opts)
     opts = opts or {}
-    local W = { clock = 1790000000, level = opts.level or 8, log = {}, order = {}, printed = {} }
+    local W = { clock = 1790000000, level = opts.level or 8, log = {}, order = {}, printed = {}, collapsed = {}, untracked = {} }
     _G.time = function() return W.clock end
     _G.date = function(fmt, t) return os.date(fmt, t or W.clock) end
     _G.UnitLevel = function() return W.level end
@@ -85,12 +85,19 @@ local function newWorld(opts)
         end
         _G.C_QuestLog = { GetTitleForQuestID = function(id) return W.log[id] and W.log[id].title end }
     else
+        local function visible()
+            local v = {}
+            for _, id in ipairs(W.order) do if not W.collapsed[id] then table.insert(v, id) end end
+            return v
+        end
         _G.C_QuestLog = {
             GetTitleForQuestID = function(id) return W.log[id] and W.log[id].title end,
-            GetNumQuestLogEntries = function() return #W.order + 1 end,
+            IsOnQuest = function(id) return W.log[id] ~= nil end,
+            GetQuestWatchType = function(id) if W.untracked[id] then return nil end return 0 end,
+            GetNumQuestLogEntries = function() return #visible() + 1 end,
             GetInfo = function(i)
                 if i == 1 then return { isHeader = true, title = "Zone header" } end
-                local id = W.order[i - 1]
+                local id = visible()[i - 1]
                 local q = id and W.log[id]
                 if not q then return nil end
                 return { questID = id, title = q.title, level = q.level, isHeader = false }
@@ -1003,6 +1010,95 @@ test("the game's quest log updates are hooked, and /qpl diag reports what was fo
     assert(W.saw("Quest frames found, QuestScrollFrame (shown)."), "frames reported")
     assert(W.saw("Hooks attached, QuestLogQuests_Update."), "hooks reported")
     _G.hooksecurefunc, _G.QuestScrollFrame, _G.QuestLogQuests_Update = nil, nil, nil
+end)
+
+
+-- 2.3, quests under a collapsed header, and timers only on tracked quests.
+
+test("a quest under a collapsed zone header isn't dropped, and an old false drop is cleared", function()
+    local W = newWorld({ level = 14 })
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(600, "Hidden Away", 14)
+    W.fire("QUEST_ACCEPTED", 600)
+    W.addQuest(601, "In Plain Sight", 14)
+    W.fire("QUEST_ACCEPTED", 601)
+    W.collapsed[600] = true
+    W.level = 15; W.fire("PLAYER_LEVEL_UP", 15)
+    eq(QuestPaceLogDB.quests[600].droppedAt, nil, "still in the log, under a collapsed header")
+    -- A record wrongly marked dropped before 2.3 gets cleared while the quest is still there.
+    QuestPaceLogDB.quests[600].droppedAt, QuestPaceLogDB.quests[600].droppedLevel = 123, 15
+    W.level = 16; W.fire("PLAYER_LEVEL_UP", 16)
+    eq(QuestPaceLogDB.quests[600].droppedAt, nil, "false drop cleared")
+    eq(QuestPaceLogDB.quests[600].droppedLevel, nil, "its level cleared too")
+    -- A quest really abandoned is still marked dropped.
+    W.removeQuest(601)
+    W.level = 17; W.fire("PLAYER_LEVEL_UP", 17)
+    eq(QuestPaceLogDB.quests[601].droppedLevel, 17, "a real drop")
+end)
+
+test("untracked quests get no timer, in the game's quest log or the addon's tracker", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(610, "Tracked Errand", 8)
+    W.fire("QUEST_ACCEPTED", 610)
+    W.addQuest(611, "Parked Errand", 8)
+    W.fire("QUEST_ACCEPTED", 611)
+    W.untracked[611] = true
+    W.clock = W.clock + 70
+    local tracked, parked = fakeFontString("Tracked Errand"), fakeFontString("[8] Parked Errand")
+    _G.QuestScrollFrame = fakeUIFrame({}, {}, { fakeUIFrame({}, { tracked, parked }) })
+    tick(W)
+    eq(tracked.text, "Tracked Errand  |cffb4b4b41:10|r", "tracked quest ticks")
+    eq(parked.text, "[8] Parked Errand", "untracked quest left alone")
+    local hud = _G.QuestPaceLogHUD
+    hud.OnUpdate(hud, 1.5)
+    assert(W.texts["Tracked Errand"] and not W.texts["Parked Errand"], "addon tracker lists only the tracked quest")
+    assert(W.texts["+1 more in your log"], "the parked quest still counts as in the log")
+    -- Tracking it again brings its timer back.
+    W.untracked[611] = nil
+    tick(W, 5)
+    eq(parked.text, "[8] Parked Errand  |cffb4b4b41:10|r", "timer back once tracked")
+    _G.QuestScrollFrame = nil
+end)
+
+test("/qpl diag shows the titles it saw under each quest frame", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(620, "Seen Quest", 8)
+    W.fire("QUEST_ACCEPTED", 620)
+    local title = fakeFontString("[8] Seen Quest")
+    _G.ObjectiveTrackerFrame = fakeUIFrame({}, {}, { fakeUIFrame({}, { title, fakeFontString("[9] Someone Else's Quest") }) })
+    tick(W)
+    W.cmd("diag")
+    assert(W.saw("Tracked open quests that get a timer, 1."), "open quest count")
+    assert(W.saw("ObjectiveTrackerFrame, 2 frames, 2 lines of text. Titles seen, \"[8] Seen Quest\" matched, \"[9] Someone Else's Quest\" no match."), "titles reported")
+    _G.ObjectiveTrackerFrame = nil
+end)
+
+
+test("the dashboard is parchment, from the game's own art when the client has it", function()
+    local W = newWorld()
+    local fonts = {}
+    _G.CreateFont = function(name)
+        local f = setmetatable({}, { __index = function() return function() end end })
+        f.SetTextColor = function(self, r, g, b) self.color = { r, g, b } end
+        fonts[name] = f
+        return f
+    end
+    _G.C_Texture = { GetAtlasInfo = function(name) if name == "questlog-parchment" then return {} end end }
+    twoSessions(W)
+    W.cmd("show overview")
+    W.cmd("diag")
+    assert(W.saw("Parchment, questlog-parchment."), "the game's own parchment art, the first one this client has")
+    assert(fonts.QuestPaceLogFont_body and fonts.QuestPaceLogFont_body.color[1] == 0.22, "brown ink for body text")
+    assert(fonts.QuestPaceLogFont_heading and fonts.QuestPaceLogFont_heading.color[1] == 0.38, "deeper ink for headings")
+    _G.CreateFont, _G.C_Texture = nil, nil
+    -- Without any of the game's parchment art, a warm parchment color.
+    local W2 = newWorld()
+    twoSessions(W2)
+    W2.cmd("show overview")
+    W2.cmd("diag")
+    assert(W2.saw("Parchment, color."), "color fallback")
 end)
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))

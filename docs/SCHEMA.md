@@ -83,7 +83,7 @@ A quest accepted in one session and turned in during a later one appears as two 
 | acceptedZone, acceptedSubZone, acceptedMapID | where, at the latest accept (1.2) |
 | greenAt, greenAtLevel | first moment it turned green (or gray) for the player |
 | grayAt, grayAtLevel | first moment it turned gray |
-| droppedAt, droppedLevel | left the log without a turn-in. Cleared if later turned in |
+| droppedAt, droppedLevel | left the log without a turn-in. Cleared if later turned in. Before 2.3 a quest under a collapsed zone header in the quest log was wrongly marked dropped at login or a level-up. From 2.3 the addon asks the game (C_QuestLog.IsOnQuest), and clears a wrong mark when the game confirms the quest is still in the log |
 | turnedInAt, turnedInLevel, xpReward, colorAtTurnIn | turn-in |
 | turnedInZone, turnedInSubZone, turnedInMapID | where, at turn-in (1.2) |
 | turnedInGroupSize | group size at turn-in, as on the entry (1.3) |
