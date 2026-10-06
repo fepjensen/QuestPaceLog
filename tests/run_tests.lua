@@ -1086,19 +1086,93 @@ test("the dashboard is parchment, from the game's own art when the client has it
         return f
     end
     _G.C_Texture = { GetAtlasInfo = function(name) if name == "questlog-parchment" then return {} end end }
+    -- The game fonts the ink fonts copy.
+    for _, base in ipairs({ "GameFontHighlightSmall", "GameFontHighlight", "GameFontNormal", "GameFontNormalLarge", "GameFontHighlightLarge" }) do _G[base] = {} end
     twoSessions(W)
     W.cmd("show overview")
     W.cmd("diag")
     assert(W.saw("Parchment, questlog-parchment."), "the game's own parchment art, the first one this client has")
-    assert(fonts.QuestPaceLogFont_body and fonts.QuestPaceLogFont_body.color[1] == 0.22, "brown ink for body text")
-    assert(fonts.QuestPaceLogFont_heading and fonts.QuestPaceLogFont_heading.color[1] == 0.38, "deeper ink for headings")
+    assert(fonts.QuestPaceLogFont_body and fonts.QuestPaceLogFont_body.color[1] == 0.16, "dark brown ink for body text")
+    assert(fonts.QuestPaceLogFont_heading and fonts.QuestPaceLogFont_heading.color[1] == 0.36, "deeper ink for headings")
     _G.CreateFont, _G.C_Texture = nil, nil
+    for _, base in ipairs({ "GameFontHighlightSmall", "GameFontHighlight", "GameFontNormal", "GameFontNormalLarge", "GameFontHighlightLarge" }) do _G[base] = nil end
     -- Without any of the game's parchment art, a warm parchment color.
     local W2 = newWorld()
     twoSessions(W2)
     W2.cmd("show overview")
     W2.cmd("diag")
     assert(W2.saw("Parchment, color."), "color fallback")
+end)
+
+
+-- 2.4, quest clocks count only time played with the quest tracked.
+
+local function hudTick()
+    local hud = _G.QuestPaceLogHUD
+    hud.OnUpdate(hud, 1.5)
+end
+
+test("a quest's clock counts only the time it was tracked", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(700, "Clocked", 8)
+    W.fire("QUEST_ACCEPTED", 700)
+    W.clock = W.clock + 60
+    W.untracked[700] = true
+    W.fire("QUEST_WATCH_LIST_CHANGED", 700, false)
+    W.clock = W.clock + 600
+    W.untracked[700] = nil
+    W.fire("QUEST_WATCH_LIST_CHANGED", 700, true)
+    W.clock = W.clock + 30
+    hudTick()
+    assert(W.texts["1:30"], "60 seconds before untracking plus 30 after")
+    W.removeQuest(700)
+    W.fire("QUEST_TURNED_IN", 700, 100, 0)
+    local e = QuestPaceLogDB.sessions[1].entries[1]
+    eq(e.activeSec, 90, "the clock is kept on the turn-in")
+    eq(e.durationSec, 690, "clock time since accepting is unchanged")
+end)
+
+test("logging out pauses the clocks, and the time away doesn't count", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(710, "Overnight", 8)
+    W.fire("QUEST_ACCEPTED", 710)
+    W.clock = W.clock + 100
+    W.fire("PLAYER_LOGOUT")
+    W.clock = W.clock + 8 * 3600
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.clock = W.clock + 20
+    hudTick()
+    assert(W.texts["2:00"], "100 seconds before logging out plus 20 after")
+end)
+
+test("a session that never logged out stops its clocks at its last activity", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(720, "Crashed", 8)
+    W.fire("QUEST_ACCEPTED", 720)
+    W.clock = W.clock + 300
+    W.fire("PLAYER_XP_UPDATE") -- the last thing that happened before the crash
+    W.clock = W.clock + 5 * 3600
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.clock = W.clock + 10
+    hudTick()
+    assert(W.texts["5:10"], "300 seconds before the crash plus 10 after")
+end)
+
+test("quests from before 2.4 start from the time you played since accepting them", function()
+    local W = newWorld({ db = { sessions = { { startedAt = 1000, startedAtStr = "old", lastActiveAt = 1600, entries = {} } },
+        quests = { [730] = { title = "Border Crossings", acceptedAt = 1100 } } } })
+    W.addQuest(730, "Border Crossings", 8)
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    eq(QuestPaceLogDB.quests[730].activeEstimated, true, "marked as an estimate")
+    hudTick()
+    -- 500 seconds played after accepting in the old session, nothing yet in this one.
+    assert(W.texts["~8:20"], "the estimate, marked with ~")
+    W.clock = W.clock + 40
+    hudTick()
+    assert(W.texts["~9:00"], "and it runs from there")
 end)
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))

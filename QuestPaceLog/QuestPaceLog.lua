@@ -660,6 +660,73 @@ local function FormatPattern(fmt)
     return "^" .. p
 end
 
+-- Quest clocks. How long you've worked on each open quest, counting only
+-- time you were playing with the quest tracked. Untracking a quest or
+-- logging out pauses its clock. Kept on the quest record as activeSec, plus
+-- activeSince while it runs.
+local function ClockPause(rec, at)
+    if rec.activeSince then
+        rec.activeSec = (rec.activeSec or 0) + math.max(0, at - rec.activeSince)
+        rec.activeSince = nil
+    end
+end
+
+local function QuestClock(rec)
+    return (rec.activeSec or 0) + (rec.activeSince and math.max(0, time() - rec.activeSince) or 0)
+end
+
+-- Seconds you played after a moment, across every session.
+local function PlayedSince(t)
+    local total = 0
+    for _, s in ipairs(QuestPaceLogDB.sessions or {}) do
+        if s.startedAt then
+            local endAt, from = s.startedAt + (PlayedSec(s) or 0), math.max(s.startedAt, t)
+            if endAt > from then total = total + endAt - from end
+        end
+    end
+    return total
+end
+
+-- Where the earlier session holding a moment ended. A clock still running
+-- from a session that never logged out, after a crash or a lost connection,
+-- stops there instead of counting the time away.
+local function SessionEndAfter(t)
+    local list = QuestPaceLogDB.sessions or {}
+    for i = #list, 1, -1 do
+        local s = list[i]
+        if s ~= session and s.startedAt and s.startedAt <= t then return s.startedAt + (PlayedSec(s) or 0) end
+    end
+    return t
+end
+
+-- Brings every open quest's clock in line with whether you track it right
+-- now. Quests accepted before 2.4 start from an estimate, the time you
+-- played since accepting them, since when you untracked them wasn't kept.
+local function SyncQuestClocks()
+    if not session then return end
+    local now = time()
+    for id, rec in pairs(QuestTracker()) do
+        if rec.acceptedAt and not rec.turnedInAt then
+            local on = IsOnQuest(id)
+            if on == false or (on == nil and rec.droppedAt) then
+                ClockPause(rec, now)
+            else
+                if rec.activeSec == nil then
+                    rec.activeSec, rec.activeEstimated, rec.activeSince = PlayedSince(rec.acceptedAt), true, nil
+                end
+                if rec.activeSince and rec.activeSince < session.startedAt then
+                    ClockPause(rec, math.max(rec.activeSince, SessionEndAfter(rec.activeSince)))
+                end
+                if IsTracked(id) then
+                    rec.activeSince = rec.activeSince or now
+                else
+                    ClockPause(rec, now)
+                end
+            end
+        end
+    end
+end
+
 -- Deaths. PLAYER_DEAD when you die, PLAYER_ALIVE when you release (as a
 -- ghost) or are brought back, PLAYER_UNGHOST when the ghost reaches the body.
 local function OpenDeath()
@@ -1011,6 +1078,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         SyncHonor()
         NotePlace()
         NoteTravel()
+        SyncQuestClocks()
         return
     end
 
@@ -1046,6 +1114,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
         end
         rec.questLevel = rec.questLevel or entry.questLevel
         rec.acceptedAt, rec.acceptedLevel = now, level
+        -- A fresh clock. It runs once the quest is tracked, often a moment after accepting.
+        rec.activeSec, rec.activeEstimated, rec.activeSince = 0, nil, IsTracked(questID) and now or nil
         entry.acceptedZone, entry.acceptedSubZone, entry.acceptedMapID = CurrentZone()
         rec.acceptedZone, rec.acceptedSubZone, rec.acceptedMapID = entry.acceptedZone, entry.acceptedSubZone, entry.acceptedMapID
         entry.colorAtAccept = DifficultyOf(entry.questLevel, level)
@@ -1085,6 +1155,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
         if rec then
             entry.questLevel = entry.questLevel or rec.questLevel
             rec.turnedInAt, rec.turnedInLevel, rec.xpReward = now, level, xpReward
+            ClockPause(rec, now)
+            entry.activeSec, entry.activeEstimated = rec.activeSec, rec.activeEstimated
             rec.turnedInZone, rec.turnedInSubZone, rec.turnedInMapID = entry.turnedInZone, entry.turnedInSubZone, entry.turnedInMapID
             rec.droppedAt, rec.droppedLevel = nil, nil
             rec.turnedInGroupSize = entry.turnedInGroupSize
@@ -1120,6 +1192,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
         if window and window:IsShown() then pcall(window.Show_, window.allTime, window.lens) end
 
     elseif event == "QUEST_WATCH_LIST_CHANGED" then
+        -- Tracking pauses and resumes the quest clocks, whatever the quest.
+        SyncQuestClocks()
         -- Fires whenever a quest is added to or removed from your on-screen
         -- tracker, whether you did it on purpose or the game did it for you
         -- on accept. Only acts on a quest this session actually has open,
@@ -1195,6 +1269,11 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "CHAT_MSG_COMBAT_XP_GAIN" then
         OnXPMessage((...))
     elseif event == "PLAYER_PVP_KILLS_CHANGED" or event == "PLAYER_LOGOUT" then
+        -- Logging out, or a reload, pauses every quest clock until you're back.
+        if event == "PLAYER_LOGOUT" then
+            local now = time()
+            for _, rec in pairs(QuestTracker()) do ClockPause(rec, now) end
+        end
         SyncHonor()
     elseif event == "CHAT_MSG_SYSTEM" then
         OnGameNotice((...))
@@ -1859,7 +1938,7 @@ end
 
 -- Ink on parchment. Body text, headings, soft labels, and the brown of
 -- card borders and dividers.
-UI.INK, UI.INK_HEAD, UI.INK_SOFT, UI.EDGE = { 0.22, 0.13, 0.05 }, { 0.38, 0.15, 0.03 }, { 0.44, 0.33, 0.20 }, { 0.45, 0.31, 0.16 }
+UI.INK, UI.INK_HEAD, UI.INK_SOFT, UI.EDGE = { 0.16, 0.09, 0.03 }, { 0.36, 0.11, 0.02 }, { 0.30, 0.20, 0.09 }, { 0.45, 0.31, 0.16 }
 
 -- "card" is a slightly darker patch of parchment with a brown border, for
 -- tiles and panels. Anything else is the dark tooltip look.
@@ -1868,7 +1947,7 @@ function UI.Backdrop(f, style)
     if style == "card" then
         f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
             tile = false, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
-        f:SetBackdropColor(0.42, 0.28, 0.12, 0.12)
+        f:SetBackdropColor(1, 0.97, 0.88, 0.34)
         f:SetBackdropBorderColor(UI.EDGE[1], UI.EDGE[2], UI.EDGE[3], 1)
         return
     end
@@ -1889,19 +1968,16 @@ end
 function UI.Fonts()
     if UI.F then return UI.F end
     local specs = {
-        body = { "GameFontHighlightSmall", UI.INK }, bodyMed = { "GameFontHighlight", UI.INK },
+        small = { "GameFontHighlightSmall", UI.INK }, body = { "GameFontHighlight", UI.INK }, bodyMed = { "GameFontHighlight", UI.INK },
         heading = { "GameFontNormal", UI.INK_HEAD }, large = { "GameFontNormalLarge", UI.INK_HEAD },
-        value = { "GameFontHighlightLarge", UI.INK }, label = { "GameFontNormalSmall", UI.INK_SOFT },
+        value = { "GameFontHighlightLarge", UI.INK }, label = { "GameFontNormal", UI.INK_SOFT },
     }
     UI.F = {}
     for key, spec in pairs(specs) do
-        local name = "QuestPaceLogFont_" .. key
-        local ok = CreateFont and pcall(function()
+        local name, base = "QuestPaceLogFont_" .. key, _G[spec[1]]
+        local ok = CreateFont and base and pcall(function()
             local font = _G[name] or CreateFont(name)
-            local base = _G[spec[1]]
-            if base then
-                if font.CopyFontObject then font:CopyFontObject(base) else font:SetFontObject(base) end
-            end
+            if font.CopyFontObject then font:CopyFontObject(base) else font:SetFontObject(base) end
             font:SetTextColor(spec[2][1], spec[2][2], spec[2][3])
             font:SetShadowOffset(0, 0)
         end)
@@ -1922,6 +1998,10 @@ end
 -- title and portrait. The game's own parchment textures first. A texture
 -- this client doesn't have gives no file or atlas, so the next is tried,
 -- and a warm parchment color is always underneath. Darker edges, like old paper.
+-- Shares of the art cut off at the left, right, top and bottom. The game's
+-- parchment comes with worn, burnt edges made for smaller windows, which
+-- stretched this wide cut through the dashboard.
+UI.PARCHMENT_CROP = { 0.04, 0.12, 0.06, 0.06 }
 UI.PARCHMENTS = {
     { atlas = "QuestBG-Parchment" }, { atlas = "questlog-parchment" }, { atlas = "UI-Frame-Parchment" },
     { file = "Interface\\AchievementFrame\\UI-Achievement-Parchment-Horizontal" },
@@ -1935,23 +2015,40 @@ function UI.Parchment(frame)
     local art = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
     art:SetAllPoints(base)
     local used = "color"
+    local cut = UI.PARCHMENT_CROP
+    local function crop(l, r, t, b)
+        local w, h = r - l, b - t
+        art:SetTexCoord(l + w * cut[1], r - w * cut[2], t + h * cut[3], b - h * cut[4])
+    end
     for _, c in ipairs(UI.PARCHMENTS) do
         if c.atlas and C_Texture and C_Texture.GetAtlasInfo and art.SetAtlas then
             local ok, info = pcall(C_Texture.GetAtlasInfo, c.atlas)
-            if ok and info and pcall(art.SetAtlas, art, c.atlas) then used = c.atlas break end
+            if ok and type(info) == "table" then
+                -- The atlas's own sheet and corners, so its worn edges can be cropped too.
+                local sheet = info.file or info.filename
+                if sheet and info.leftTexCoord and pcall(art.SetTexture, art, sheet) then
+                    crop(info.leftTexCoord, info.rightTexCoord, info.topTexCoord, info.bottomTexCoord)
+                    used = c.atlas break
+                elseif pcall(art.SetAtlas, art, c.atlas) then
+                    used = c.atlas break
+                end
+            end
         elseif c.file then
             art:SetTexture(c.file)
             local id = art.GetTextureFileID and art:GetTextureFileID()
-            if type(id) == "number" and id > 0 then used = c.file break end
+            if type(id) == "number" and id > 0 then crop(0, 1, 0, 1) used = c.file break end
         end
     end
     if used == "color" then art:Hide() end
+    local wash = frame:CreateTexture(nil, "BACKGROUND", nil, -6)
+    wash:SetAllPoints(base)
+    wash:SetColorTexture(1, 0.97, 0.88, 0.22)
     local shade = { 0.30, 0.18, 0.06 }
     for _, e in ipairs({
-        { "TOPLEFT", "TOPRIGHT", nil, 36, "VERTICAL", 0, 0.26 }, { "BOTTOMLEFT", "BOTTOMRIGHT", nil, 36, "VERTICAL", 0.26, 0 },
-        { "TOPLEFT", "BOTTOMLEFT", 36, nil, "HORIZONTAL", 0.22, 0 }, { "TOPRIGHT", "BOTTOMRIGHT", 36, nil, "HORIZONTAL", 0, 0.22 },
+        { "TOPLEFT", "TOPRIGHT", nil, 28, "VERTICAL", 0, 0.16 }, { "BOTTOMLEFT", "BOTTOMRIGHT", nil, 28, "VERTICAL", 0.16, 0 },
+        { "TOPLEFT", "BOTTOMLEFT", 28, nil, "HORIZONTAL", 0.14, 0 }, { "TOPRIGHT", "BOTTOMRIGHT", 28, nil, "HORIZONTAL", 0, 0.14 },
     }) do
-        local t = frame:CreateTexture(nil, "BACKGROUND", nil, -6)
+        local t = frame:CreateTexture(nil, "BACKGROUND", nil, -5)
         t:SetPoint(e[1], base, e[1])
         t:SetPoint(e[2], base, e[2])
         if e[3] then t:SetWidth(e[3]) else t:SetHeight(e[4]) end
@@ -2294,9 +2391,9 @@ local function BuildWindow()
     local LEVEL_BASE, LEVEL_MAX_H, LEVEL_COLS = -552, 46, 20
     local levelCols = {}
     for i = 1, LEVEL_COLS do
-        levelCols[i] = { bar = UI.Bar(ov, 24, LEVEL_MAX_H, GOLD, true), time = UI.Text(ov, F.body, 0, 0, "CENTER"), level = UI.Text(ov, F.label, 0, 0, "CENTER") }
+        levelCols[i] = { bar = UI.Bar(ov, 24, LEVEL_MAX_H, GOLD, true), time = UI.Text(ov, F.small, 0, 0, "CENTER"), level = UI.Text(ov, F.small, 0, 0, "CENTER") }
     end
-    local levelNote = UI.Text(ov, F.label, -PAD, -478, "TOPRIGHT")
+    local levelNote = UI.Text(ov, F.small, -PAD, -478, "TOPRIGHT")
 
     -- Lens views. A heading, twelve rows of bars, a note, the Compass graph
     -- and, on the Compass, a suggestion when your play leans another way.
@@ -2735,7 +2832,7 @@ local function HUDQuests()
     for id in pairs(inLog) do
         total = total + 1
         local rec = tracker[id]
-        if rec and rec.acceptedAt and not rec.turnedInAt and IsTracked(id) then table.insert(timed, { title = rec.title or inLog[id].title, at = rec.acceptedAt }) end
+        if rec and rec.acceptedAt and not rec.turnedInAt and IsTracked(id) then table.insert(timed, { title = rec.title or inLog[id].title, at = rec.acceptedAt, rec = rec }) end
     end
     table.sort(timed, function(a, b) return a.at > b.at end)
     return timed, total
@@ -2842,7 +2939,7 @@ local hudOk, hudErr = pcall(function()
                         local q = quests[i]
                         if q or i == 1 then
                             row.name:SetText(q and q.title or "No timed quests open")
-                            row.timer:SetText(q and MinSec(time() - q.at) or "")
+                            row.timer:SetText(q and UI.ClockText(q.rec) or "")
                             place(row.name, 6, y)
                             place(row.timer, -6, y, "TOPRIGHT")
                             y = y - 14
@@ -3009,12 +3106,17 @@ function UI.Fit(fs, base, suffix)
     return base .. suffix
 end
 
-function UI.Stamp(fs, at)
+-- A quest's clock as the timers show it, with ~ when it started from an estimate.
+function UI.ClockText(rec)
+    return (rec.activeEstimated and "~" or "") .. MinSec(QuestClock(rec))
+end
+
+function UI.Stamp(fs, rec)
     local cur = fs:GetText()
     if type(cur) ~= "string" or cur == "" then return end
     local mark = UI.stamped[fs]
     local base = (mark and cur == mark.shown) and mark.base or cur
-    local new = UI.Fit(fs, base, "  " .. UI.TIMER_COLOR .. MinSec(time() - at) .. "|r")
+    local new = UI.Fit(fs, base, "  " .. UI.TIMER_COLOR .. UI.ClockText(rec) .. "|r")
     if new ~= cur then fs:SetText(new) end
     UI.stamped[fs] = { base = base, shown = new }
 end
@@ -3089,15 +3191,15 @@ function UI.OnQuestUIUpdate()
     end
 end
 
--- Accept times of the quests that get a timer, by quest ID and by title.
+-- The quests that get a timer, their records by quest ID and by title.
 -- Tracked quests still in your log. Untracked ones are parked as backlog.
 function UI.OpenQuestTimes()
     local byID, byTitle = {}, {}
     for id, rec in pairs(QuestTracker()) do
         local on = IsOnQuest(id)
         if rec.acceptedAt and not rec.turnedInAt and (on or (on == nil and not rec.droppedAt)) and IsTracked(id) then
-            byID[id] = rec.acceptedAt
-            if rec.title and (not byTitle[rec.title] or rec.acceptedAt > byTitle[rec.title]) then byTitle[rec.title] = rec.acceptedAt end
+            byID[id] = rec
+            if rec.title and (not byTitle[rec.title] or rec.acceptedAt > byTitle[rec.title].acceptedAt) then byTitle[rec.title] = rec end
         end
     end
     return byID, byTitle
@@ -3154,6 +3256,7 @@ local tickOk, tickErr = pcall(function()
             end
         end
         if ticks % 10 == 1 then UI.AttachQuestUIHooks() end
+        if ticks % 5 == 1 then pcall(SyncQuestClocks) end
         local ok, err = pcall(UI.RefreshQuestTimers, UI.dirty or ticks % 5 == 1)
         UI.dirty = false
         if not ok then UI.timersError = tostring(err) end

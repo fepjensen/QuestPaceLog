@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.4, 2026-10-05
+
+- Quest timers now count only the time you played with the quest tracked. Untracking a quest pauses its clock and tracking it again resumes it. Logging out or reloading pauses every clock, so time away doesn't count, and a session that ends without a logout, after a crash or a lost connection, stops its clocks at its last activity. Each quest record keeps its clock (`activeSec`, `activeSince`), and each turn-in keeps the final count (`activeSec` on the entry). `durationSec` is unchanged, still clock time from accept to turn-in.
+- Quests accepted before 2.4 start their clock from an estimate, the time you played since accepting them, shown with a ~ (`activeEstimated`). When they were untracked wasn't recorded before.
+- Easier to read on parchment. Darker ink, body text one size larger, cream cards that lift the paper under tiles and the report, and a light cream wash that calms the parchment's texture.
+- The game's parchment art is cropped to its clean middle, so its worn, burnt edges no longer cut through the tiles and the report box.
+
 ## 2.3, 2026-10-05
 
 - Fixed quests wrongly recorded as dropped. The game's quest list leaves out quests under a collapsed zone header, and the addon read that as the quest leaving the log. On 2026-10-05 at 21:57, a level-up marked three open quests dropped this way. The addon now asks the game whether you're still on a quest (C_QuestLog.IsOnQuest), and clears a wrong `droppedAt` and `droppedLevel` when the game confirms the quest is still in your log. Real drops are still recorded.

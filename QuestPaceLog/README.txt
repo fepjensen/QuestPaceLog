@@ -160,9 +160,11 @@ under AddOns. Pick which lines the tracker shows, turn the quest timers
 and cheer messages on or off, and change your type.
 
 Quest timers in the game's own quest list. Each open quest you track
-shows how long it has been since you accepted it, in gray after its
-title, in the objective tracker and in the quest log on the map.
-Untracked quests are parked as backlog, so they show no timer. /qpl diag says which
+shows how long you've worked on it, in gray after its title, in the
+objective tracker and in the quest log on the map. The clock only runs
+while you're playing with the quest tracked. Untracking a quest parks it
+and pauses its clock, and logging out pauses every clock. Quests accepted
+before version 2.4 start from an estimate, shown with a ~. /qpl diag says which
 of the game's quest frames the addon found, if a timer doesn't show.
 
 Version 2.0, something for each kind of player.

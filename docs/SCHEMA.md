@@ -71,6 +71,8 @@ A quest accepted in one session and turned in during a later one appears as two 
 | reason | letter a to g or nil | optional note from /qpl why (1.1). Not used as evidence |
 | moneyReward | number (copper) or nil | money paid at turn-in (2.0) |
 | suggestedGroup | number or nil | the group size the quest log suggested, when more than 1 (2.0) |
+| activeSec | number or nil | seconds the quest was tracked while you were playing, accept to turn-in, from its record's clock (2.4) |
+| activeEstimated | true or nil | the clock started from an estimate, for quests accepted before 2.4 (2.4) |
 
 ## Quest record (1.1), one per questID, across sessions
 
@@ -89,6 +91,8 @@ A quest accepted in one session and turned in during a later one appears as two 
 | turnedInGroupSize | group size at turn-in, as on the entry (1.3) |
 | reason | copy of the entry's /qpl why letter |
 | zones | the zones the quest took you through while open, in order, starting where you accepted it (2.0) |
+| activeSec, activeSince | the quest's clock. activeSec is the seconds counted so far, activeSince the epoch seconds the current running stretch began, nil while paused. It runs only while you're logged in with the quest tracked. Untracking or logging out pauses it, and a session that ends without a logout stops it at that session's last activity (2.4) |
+| activeEstimated | true when the clock started from an estimate, the time played since accepting, because the quest was accepted before 2.4 and when it was untracked wasn't kept (2.4) |
 
 Picking a quest back up after turning it in or dropping it starts a fresh record for that questID.
 
