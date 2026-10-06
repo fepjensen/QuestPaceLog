@@ -16,7 +16,8 @@ QuestPaceLogDB = {
   journal  = { [questID] = { title, text, objective, savedAt }, ... },          -- 2.0, quest text kept at accept
   records  = { [key] = { value, at, label, session }, ... },                    -- 2.0, keys below
   goal     = { level, by, byStr, setAt, setLevel } or nil,                     -- 2.0, from /qpl goal
-  settings = { cheer = true or false, lens = "achiever" or nil, hud = false or nil },  -- 2.0, hud from 2.1
+  settings = { cheer, lens, hud, archetype, welcomed, keptType, suggestedAt,     -- 2.0, see Settings below
+               hudStats, hudCollapsed, timersInLog, timersInTracker },
 }
 ```
 
@@ -114,6 +115,23 @@ name, gainedAt, gainedAtStr, zone, subZone, and endedAt, endedAtStr when the buf
 ## Group (1.3)
 
 joinedAt, joinedAtStr, joinedLevel, zone, subZone (where you joined), leftAt, leftAtStr, durationSec, maxSize, and sizes, an array of { at, size } with one item for each change in size, the first being the size at joining. Sizes count you. alreadyGrouped is true when you were already in the group at login or reload, so joinedAt is that moment rather than the real join. A group still open when you log out keeps no leftAt, and the next login opens a fresh record flagged alreadyGrouped. No names or other data about the members are kept.
+
+## Settings (2.0, more in 2.1 and 2.2)
+
+The player's choices. Nothing here is play data, and the export to the site leaves it out.
+
+| Field | Meaning |
+|---|---|
+| cheer | false turns off the record, level and goal chat lines (2.0) |
+| lens | the dashboard tab picked last, or nil (2.0) |
+| hud | false hides the on-screen tracker (2.1) |
+| archetype | the player type picked in the welcome window, "achiever", "explorer", "socializer", "competitor", or "auto" to follow the Compass (2.2) |
+| welcomed | true once the welcome window has been answered or put off (2.2) |
+| keptType | "chosen>leans" when the player kept their type after the Compass suggested another, for example "explorer>achiever" (2.2) |
+| suggestedAt | epoch seconds of the last login hint that the play leans another way, at most one a day (2.2) |
+| hudStats | { [stat] = true } for the tracker lines the player picked, nil to follow their type. Stats are xpbar, eta, xpmin, goal, quests, played, rest, gold, discoveries, flight, group, grouped, kills, deaths, timers (2.2) |
+| hudCollapsed | true when the tracker is collapsed to its header (2.2) |
+| timersInLog, timersInTracker | false turns off the quest timers in the map's quest log or the objective tracker (2.2) |
 
 ## Colors
 

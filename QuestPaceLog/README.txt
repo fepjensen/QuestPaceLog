@@ -145,6 +145,25 @@ window updates by itself when you turn in a quest while it's open. Its two butto
 session and all sessions together. You can select the text in it and copy
 it with Ctrl+C. /qpl report all prints the all-sessions report in chat.
 
+Version 2.2, pick your type.
+The first time you log in, a welcome window explains the four types and
+asks which one sounds like you. Your type decides what the dashboard and
+the on-screen tracker show first. You can also let your play decide.
+/qpl type opens the window again, or /qpl type explorer (or achiever,
+socializer, competitor, auto) changes it straight away. The Compass keeps
+measuring how you actually play, and after an hour of play it tells you
+if you lean clearly toward another type, with a button to switch or keep.
+
+Settings. Right-click the tracker or the minimap button, press Settings
+on the dashboard, type /qpl options, or open the game's Options and look
+under AddOns. Pick which lines the tracker shows, turn the quest timers
+and cheer messages on or off, and change your type.
+
+Quest timers in the game's own quest list. Each open quest shows how long
+it has been since you accepted it, in gray after its title, in the
+objective tracker and in the quest log on the map. /qpl diag says which
+of the game's quest frames the addon found, if a timer doesn't show.
+
 Version 2.0, something for each kind of player.
 Richard Bartle described four kinds of player, Achievers, Explorers,
 Socializers and Killers. The dashboard has a lens for each, plus an

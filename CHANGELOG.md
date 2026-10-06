@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.2, 2026-10-05
+
+- A welcome window explains Bartle's four types of player and lets you pick the one that sounds like you, or let your play decide. It opens by itself the first time, and /qpl type opens it again (`settings.archetype`, `settings.welcomed`). Your type sets the dashboard's first tab and the tracker's lines.
+- The Compass still measures how you play. After an hour of play, if your play leans clearly toward another type (25 points or more), the Compass tab shows it with Switch and Keep buttons, and a chat line says so at login, at most once a day (`settings.keptType`, `settings.suggestedAt`).
+- A settings window, from right-clicking the tracker or the minimap button, the Settings button on the dashboard, /qpl options, or the game's Options under AddOns. Pick which of 15 lines the tracker shows (`settings.hudStats`), turn quest timers and cheer messages on or off, and change your type.
+- Quest timers in the game's own objective tracker and in the quest log on the map, after each quest's title, in gray (`settings.timersInTracker`, `settings.timersInLog`). Long titles are shortened with "..." so the timer stays on the same line. /qpl diag reports which of the game's quest frames were found.
+- New look, closer to the game's own windows. Portrait frames, tabs along the bottom edge, the game's status bars and tooltip borders, a round minimap button, and a tracker styled like the objective tracker, with a minus to collapse it (`settings.hudCollapsed`). The game's open, close and tab sounds.
+- WoW Forever runs the modern interface (the objective tracker and Edit Mode are in its logs), so the timers target those frames, with the older Classic frames as a fallback.
+- Not yet verified in the real Forever client.
+
 ## 2.1, 2026-10-04
 
 - On-screen tracker, a small panel that stays up while you play, in combat too. The top follows your lens, for example an XP bar, time to the next level and your goal for an Achiever, or kills and deaths for a Competitor. The bottom lists your 3 newest open quests with a live timer, real clock time since you accepted them, and how many more are in your log. Drag to move it, click to open the dashboard, /qpl hud off hides it (`settings.hud`).

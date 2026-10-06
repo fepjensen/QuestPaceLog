@@ -2,7 +2,8 @@
 ## Title: Quest Pace Log
 ## Notes: Tracks your quests, leveling, discoveries, groups and deaths, with a dashboard for each kind of player.
 ## Author: Felipe Jensen
-## Version: 2.1
+## Version: 2.2
+## IconTexture: Interface\Icons\INV_Misc_Book_09
 ## SavedVariablesPerCharacter: QuestPaceLogDB
 
 QuestPaceLog.lua

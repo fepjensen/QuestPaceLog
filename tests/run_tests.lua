@@ -53,7 +53,10 @@ local function newWorld(opts)
             if what == "OnEnter" then table.insert(W.hovers, function() fn(self) end) end
             self[what] = fn
         end
-        f.SetSize = function(_, w, h) if w == 780 then W.windowHeight = h end end
+        f.SetSize = function(self, w, h) self.w, self.h = w, h end
+        f.GetText = function(self) return self.shownText end
+        f.SetChecked = function(self, v) self.checked = v end
+        f.GetChecked = function(self) return self.checked end
         f.SetText = function(self, t) self.shownText = t; W.lastText = t; W.texts[t] = true end
         f.Show = function(self) self.shown = true end
         f.Hide = function(self) self.shown = false end
@@ -65,7 +68,7 @@ local function newWorld(opts)
     end
     W.missingTemplates, W.texts, W.hovers = {}, {}, {}
     _G.CreateFrame = function(_, name, _, template)
-        if template and W.missingTemplates[template] then error("Couldn't find inherited node " .. template) end
+        if template and (W.missingTemplates == "all" or W.missingTemplates[template]) then error("Couldn't find inherited node " .. template) end
         local f = fakeFrame()
         if name then _G[name] = f end
         return f
@@ -435,7 +438,7 @@ end)
 
 test("the window still opens when the client lacks the templates", function()
     local W = newWorld()
-    W.missingTemplates = { BasicFrameTemplateWithInset = true, UIPanelScrollFrameTemplate = true, UIPanelButtonTemplate = true, UIPanelCloseButton = true }
+    W.missingTemplates = "all"
     twoSessions(W)
     W.cmd("show overview")
     assert(W.lastText and W.lastText:find("Quests logged, 1.", 1, true), "plain window shows the report")
@@ -534,8 +537,8 @@ test("hovering a recent quest shows its details", function()
     W.cmd("show overview")
     -- OnEnter scripts in creation order. The book button comes first, then
     -- the eight quest rows, and this session's one quest sits in row 1.
-    eq(#W.hovers, 9, "button plus eight hover strips")
-    W.hovers[2]()
+    local row = _G.QuestPaceLogRow1
+    row.OnEnter(row)
     local all = table.concat(lines, " | ")
     assert(all:find("Second Day", 1, true), "title in the tooltip, got " .. all)
     assert(all:find("In Brill, Tirisfal Glades", 1, true), "zone in the tooltip")
@@ -548,7 +551,7 @@ test("the window is never taller than the screen", function()
     _G.UIParent = { GetHeight = function() return 700 end }
     twoSessions(W)
     W.cmd("show overview")
-    eq(W.windowHeight, 680, "clamped to the screen")
+    eq(_G.QuestPaceLogFrame.h, 680, "clamped to the screen")
     _G.UIParent = nil
 end)
 
@@ -767,12 +770,12 @@ test("the on-screen tracker shows your lens and the 3 newest open quests with ti
     local hud = _G.QuestPaceLogHUD
     hud.OnUpdate(hud, 1.5)
     assert(not W.saw("couldn't update"), "tracker updated without an error")
-    assert(W.texts["Quest Pace Log, Achiever"], "lens title")
+    assert(W.texts["Quest Pace Log"], "tracker header")
     assert(W.texts["Newest"] and W.texts["1:00"] and W.texts["Middle"] and W.texts["3:00"], "newest three with live timers")
     assert(not W.texts["Old"], "only three quests")
     assert(W.texts["+1 more in your log"], "the rest counted")
     assert(W.texts["Set a goal with /qpl goal 20"], "achiever lines")
-    QuestPaceLogDB.settings.lens, hud.lensAt = "competitor", nil
+    QuestPaceLogDB.settings.hudStats = { kills = true, deaths = true, timers = true }
     hud.OnUpdate(hud, 1.5)
     assert(W.texts["Kills 0, 0 an hour"], "competitor lines")
     W.cmd("hud off")
@@ -788,6 +791,218 @@ test("the X closes the dashboard", function()
     eq(_G.QuestPaceLogFrame.shown, true, "open")
     _G.QuestPaceLogFrameClose.OnClick()
     eq(_G.QuestPaceLogFrame.shown, false, "closed by the X")
+end)
+
+-- 2.2, the welcome window, the Compass suggestion, tracker stats and quest log timers.
+
+-- Runs the once-a-second ticker that handles quest timers and the welcome check.
+local function tick(W, n)
+    local t = _G.QuestPaceLogTimers
+    for _ = 1, n or 1 do t.OnUpdate(t, 1.5) end
+end
+
+test("the welcome window opens on first login and choosing a type sets the dashboard's lens", function()
+    local W = newWorld()
+    twoSessions(W)
+    tick(W)
+    eq(_G.QuestPaceLogWelcome.shown, true, "welcome opens by itself")
+    assert(shown(W, "What kind of player are you?"), "welcome heading")
+    assert(shown(W, "Bartle called this type the Killer"), "the four types explained")
+    local card = _G.QuestPaceLogWelcomeCard2
+    card.OnClick(card)
+    assert(shown(W, "Choose Explorer"), "the choose button names the pick")
+    _G.QuestPaceLogWelcomeChoose.OnClick()
+    eq(QuestPaceLogDB.settings.archetype, "explorer", "type saved")
+    eq(QuestPaceLogDB.settings.welcomed, true, "welcome done")
+    eq(_G.QuestPaceLogWelcome.shown, false, "welcome closed")
+    assert(W.saw("You chose Explorer."), "chat confirms")
+    W.cmd("show")
+    eq(_G.QuestPaceLogFrame.lens, "explorer", "dashboard opens on the chosen type")
+    assert(shown(W, "Explorer (you)"), "chosen type marked on its tab")
+    -- Already welcomed, so the next login doesn't open it again.
+    _G.QuestPaceLogWelcome = nil
+    local W2 = newWorld({ db = QuestPaceLogDB })
+    W2.fire("PLAYER_ENTERING_WORLD", false, true)
+    tick(W2)
+    eq(_G.QuestPaceLogWelcome, nil, "no welcome the second time")
+end)
+
+test("letting your play decide, and /qpl type with a name", function()
+    local W = newWorld()
+    twoSessions(W)
+    tick(W)
+    _G.QuestPaceLogWelcomeAuto.OnClick()
+    eq(QuestPaceLogDB.settings.archetype, "auto", "auto saved")
+    W.cmd("type competitor")
+    eq(QuestPaceLogDB.settings.archetype, "competitor", "type from the command")
+    W.cmd("type wizard")
+    assert(W.saw("/qpl type opens the welcome window"), "help for an unknown type")
+end)
+
+-- A long session with many quests and nothing else, so the play leans Achiever.
+local function achieverDay(W)
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    for i = 1, 20 do
+        W.addQuest(2000 + i, "Errand " .. i, 8)
+        W.fire("QUEST_ACCEPTED", 2000 + i)
+        W.clock = W.clock + 200
+        W.removeQuest(2000 + i)
+        W.fire("QUEST_TURNED_IN", 2000 + i, 100, 0)
+    end
+end
+
+test("the Compass suggests switching when your play leans clearly another way, and stays quiet once kept", function()
+    local W = newWorld()
+    QuestPaceLogDB = { sessions = {}, settings = { archetype = "explorer", welcomed = true } }
+    achieverDay(W)
+    tick(W)
+    assert(W.saw("your play leans Achiever more than Explorer, the type you chose"), "a login hint in chat")
+    W.cmd("show compass")
+    assert(shown(W, "You chose Explorer, but across all your sessions your play leans Achiever"), "banner on the Compass")
+    assert(shown(W, "Keep Explorer"), "keep button")
+    _G.QuestPaceLogKeepType.OnClick()
+    eq(QuestPaceLogDB.settings.keptType, "explorer>achiever", "choice kept")
+    W.texts = {}
+    W.cmd("show compass")
+    assert(not shown(W, "You chose Explorer, but"), "no banner after keeping")
+    QuestPaceLogDB.settings.keptType = nil
+    W.cmd("show compass")
+    _G.QuestPaceLogSwitchType.OnClick()
+    eq(QuestPaceLogDB.settings.archetype, "achiever", "switched")
+end)
+
+test("no suggestion before an hour of play", function()
+    local W = newWorld()
+    QuestPaceLogDB = { sessions = {}, settings = { archetype = "explorer", welcomed = true } }
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    for i = 1, 5 do
+        W.addQuest(3000 + i, "Short " .. i, 8)
+        W.fire("QUEST_ACCEPTED", 3000 + i)
+        W.clock = W.clock + 120
+        W.removeQuest(3000 + i)
+        W.fire("QUEST_TURNED_IN", 3000 + i, 100, 0)
+    end
+    tick(W)
+    assert(not W.saw("your play leans"), "too early to tell")
+end)
+
+test("you pick what the tracker shows in the settings window", function()
+    local W = newWorld()
+    QuestPaceLogDB = { sessions = {}, settings = { archetype = "achiever", welcomed = true } }
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    local hud = _G.QuestPaceLogHUD
+    hud.OnUpdate(hud, 1.5)
+    assert(W.texts["Set a goal with /qpl goal 20"], "achiever default shows the goal")
+    W.cmd("options")
+    eq(_G.QuestPaceLogOptions.shown, true, "settings open")
+    local kills = _G.QuestPaceLogOptionsStat_kills
+    kills:SetChecked(true)
+    kills.OnClick(kills)
+    local goal = _G.QuestPaceLogOptionsStat_goal
+    goal:SetChecked(false)
+    goal.OnClick(goal)
+    eq(QuestPaceLogDB.settings.hudStats.kills, true, "kills picked")
+    eq(QuestPaceLogDB.settings.hudStats.goal, nil, "goal unpicked")
+    eq(QuestPaceLogDB.settings.hudStats.xpbar, true, "the rest of the type's choices kept")
+    W.texts = {}
+    hud.OnUpdate(hud, 1.5)
+    assert(W.texts["Kills 0, 0 an hour"], "kills on the tracker")
+    assert(not W.texts["Set a goal with /qpl goal 20"], "goal gone from the tracker")
+    _G.QuestPaceLogOptionsReset.OnClick()
+    eq(QuestPaceLogDB.settings.hudStats, nil, "back to the type's choices")
+    local cheer = _G.QuestPaceLogOptionsCheer
+    cheer:SetChecked(false)
+    cheer.OnClick(cheer)
+    eq(QuestPaceLogDB.settings.cheer, false, "cheer off from settings")
+end)
+
+test("the tracker's minus collapses it to its header", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    local hud = _G.QuestPaceLogHUD
+    _G.QuestPaceLogHUDToggle.OnClick()
+    eq(QuestPaceLogDB.settings.hudCollapsed, true, "collapsed saved")
+    W.texts = {}
+    hud.OnUpdate(hud, 1.5)
+    assert(W.texts["+"], "plus to expand again")
+    assert(not W.texts["Set a goal with /qpl goal 20"], "stats hidden while collapsed")
+    _G.QuestPaceLogHUDToggle.OnClick()
+    hud.OnUpdate(hud, 1.5)
+    assert(W.texts["Set a goal with /qpl goal 20"], "stats back after expanding")
+end)
+
+-- A fake piece of the game's UI. Frames have regions and children, font strings have text.
+local function fakeFontString(text)
+    return { text = text, GetObjectType = function() return "FontString" end,
+        GetText = function(self) return self.text end, SetText = function(self, t) self.text = t end }
+end
+local function fakeUIFrame(fields, regions, children)
+    local f = fields or {}
+    f.IsVisible = function() return true end
+    f.GetRegions = function() return unpack(regions or {}) end
+    f.GetChildren = function() return unpack(children or {}) end
+    return f
+end
+
+test("quest timers in the game's objective tracker and map quest log", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(4001, "A Recipe For Death", 15)
+    W.fire("QUEST_ACCEPTED", 4001)
+    W.addQuest(4002, "Story Quest", 8)
+    W.fire("QUEST_ACCEPTED", 4002)
+    W.clock = W.clock + 130
+    -- The tracker block carries the quest's ID, the map list only its title.
+    local header = fakeFontString("[15] A Recipe For Death")
+    local objective = fakeFontString("- 0/1 Berard's Journal")
+    local block = fakeUIFrame({ questID = 4001, HeaderText = header }, { header, objective })
+    _G.ObjectiveTrackerFrame = fakeUIFrame({}, {}, { block })
+    local title = fakeFontString("Story Quest")
+    _G.QuestScrollFrame = fakeUIFrame({}, {}, { fakeUIFrame({}, { title }) })
+    tick(W)
+    eq(header.text, "[15] A Recipe For Death  |cffb4b4b42:10|r", "timer after the tracker title")
+    eq(title.text, "Story Quest  |cffb4b4b42:10|r", "timer after the map log title")
+    eq(objective.text, "- 0/1 Berard's Journal", "objective lines untouched")
+    W.clock = W.clock + 60
+    tick(W)
+    eq(header.text, "[15] A Recipe For Death  |cffb4b4b43:10|r", "the timer ticks, never doubled")
+    -- The game redraws the title, the timer comes back once.
+    header.text = "[15] A Recipe For Death"
+    tick(W, 5)
+    eq(header.text, "[15] A Recipe For Death  |cffb4b4b43:10|r", "restamped after a redraw")
+    -- Turned off in settings, the title goes back to the game's own text.
+    QuestPaceLogDB.settings.timersInTracker = false
+    tick(W, 5)
+    eq(header.text, "[15] A Recipe For Death", "tracker timer removed")
+    eq(title.text, "Story Quest  |cffb4b4b43:10|r", "map log timer stays")
+    _G.ObjectiveTrackerFrame, _G.QuestScrollFrame = nil, nil
+end)
+
+test("the game's quest log updates are hooked, and /qpl diag reports what was found", function()
+    local W = newWorld()
+    _G.hooksecurefunc = function(a, b, c)
+        if type(a) == "string" then
+            local orig = _G[a]
+            _G[a] = function(...) orig(...) b(...) end
+        else
+            local orig = a[b]
+            a[b] = function(...) orig(...) c(...) end
+        end
+    end
+    local title = fakeFontString("Story Quest")
+    _G.QuestScrollFrame = fakeUIFrame({}, {}, { fakeUIFrame({}, { title }) })
+    _G.QuestLogQuests_Update = function() title.text = "Story Quest" end
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(4100, "Story Quest", 8)
+    W.fire("QUEST_ACCEPTED", 4100)
+    tick(W)
+    W.clock = W.clock + 65
+    QuestLogQuests_Update()
+    eq(title.text, "Story Quest  |cffb4b4b41:05|r", "stamped right after the game's update")
+    W.cmd("diag")
+    assert(W.saw("Quest frames found, QuestScrollFrame (shown)."), "frames reported")
+    assert(W.saw("Hooks attached, QuestLogQuests_Update."), "hooks reported")
+    _G.hooksecurefunc, _G.QuestScrollFrame, _G.QuestLogQuests_Update = nil, nil, nil
 end)
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))
