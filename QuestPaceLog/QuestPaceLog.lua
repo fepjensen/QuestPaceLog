@@ -5,7 +5,7 @@
 --
 -- A session starts on its own the moment you log into this character, no
 -- command needed. /reload doesn't start a new one, it picks the current
--- session back up, so long as the beta's SavedVariables bug hasn't already
+-- session back up, so long as the saved file from before the reload made it
 -- wiped it (see the README).
 --
 -- Besides quests, this also tracks three related things, all from the same
@@ -112,7 +112,7 @@ local function ResumeOrStartSession()
         print("|cff33ff99[QuestPaceLog]|r Reload detected, continuing the session started at " .. (recent.startedAtStr or "?") .. ".")
     else
         -- Either this is the very first reload ever for this character, or the
-        -- beta's SavedVariables bug meant nothing came back to resume. Either
+        -- saved file didn't come back from the reload. Either
         -- way, a fresh session is the only honest option here.
         StartSession()
     end

@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.0.0, 2026-11-01
+
+The launch build, for WoW Forever's release on November 4.
+
+- Runs in the launch client, `F:\World of Warcraft\_forever_`. Its version, 1.60.1, is interface 16001, the same number the beta reported, so the toc is unchanged.
+- `deploy.ps1` links the addon into `_forever_` by default, and takes another game folder by name.
+- `tools/export_site.py` reads the launch client's saved data and labels it "WoW Forever" (`--game` changes the label). `update-site.ps1` stops before replacing the Lab page's beta summary, which is the only copy of the beta data left after the beta client's WTF folder was removed.
+- The player README and code comments no longer mention the beta.
+- No change to the saved data format. New characters start with empty saved data, and the welcome window opens on first login.
+
 ## 2.4.2, 2026-10-05
 
 - Quest timers in the objective tracker. /qpl diag showed the addon reading the tracker but recognizing no title. The tracker can wrap quest titles in color codes, so titles are now compared without the game's color, icon and link codes. The tracker's quest sections are also scanned by name, in case they sit outside the tracker's own frame.

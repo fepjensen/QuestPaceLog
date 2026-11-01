@@ -2,14 +2,14 @@
 
 Reads every QuestPaceLog*.lua under each character's SavedVariables folder,
 the live file and the dated backups, and merges their sessions by start
-time, so sessions a backup kept but the beta's save bug wiped still count.
+time, so sessions a backup kept but the live file lost still count.
 Only reads the WTF folder, never writes to it.
 
-    python tools/export_site.py --out path/to/questpacelog.json [--until 2026-09-27]
+    python tools/export_site.py --out path/to/questpacelog.json [--until 2026-09-27] [--wtf ...] [--game ...]
 """
 import argparse, collections, datetime, glob, json, os, re, sys
 
-WTF = r"F:\World of Warcraft\_classic_beta_\WTF\Account"
+WTF = r"F:\World of Warcraft\_forever_\WTF\Account"
 
 
 # --- Reading the Lua file WoW writes -------------------------------------
@@ -284,6 +284,7 @@ def main():
     ap.add_argument("--wtf", default=WTF)
     ap.add_argument("--out", required=True)
     ap.add_argument("--until", help="only sessions started on or before this date, YYYY-MM-DD")
+    ap.add_argument("--game", default="WoW Forever", help="the label the site shows for this data")
     args = ap.parse_args()
     chars = []
     for folder in sorted(glob.glob(os.path.join(args.wtf, "*", "*", "*", "SavedVariables"))):
@@ -293,7 +294,7 @@ def main():
     if not chars:
         sys.exit("No QuestPaceLog saved data found under " + args.wtf)
     data = {"schemaVersion": 3, "tool": "questpacelog", "generatedOn": datetime.date.today().isoformat(),
-            "game": "WoW Forever beta", "characters": chars}
+            "game": args.game, "characters": chars}
     with open(args.out, "w", encoding="utf-8", newline="\n") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
         f.write("\n")

@@ -4,6 +4,15 @@
 $portfolio = 'F:\Claude Code\portfolio'
 $data = 'src/data/lab/questpacelog.json'
 
+# The beta's raw saved data was removed with the beta client. The summary on
+# the Lab page is the only copy left, so it isn't replaced until the page can
+# show beta and launch data side by side. See docs/LAUNCH.md.
+$current = Get-Content (Join-Path $portfolio $data) -Raw | ConvertFrom-Json
+if ($current.game -eq 'WoW Forever beta') {
+    Write-Host 'The Lab page still holds the beta data, the only copy left of it. Nothing was changed. See docs/LAUNCH.md, part A, step 3.'
+    exit 1
+}
+
 python "$PSScriptRoot\tools\export_site.py" --out (Join-Path $portfolio $data)
 if ($LASTEXITCODE) { Write-Host 'The export failed, nothing changed.'; exit 1 }
 

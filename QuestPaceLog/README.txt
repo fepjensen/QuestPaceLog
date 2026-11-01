@@ -9,14 +9,14 @@ another player's data, so it sits inside a normal addon's allowed behavior,
 the same category as a log uploader or a quest tracker.
 
 Install.
-1. Find your WoW Forever installation folder (the folder next to _retail_
-   and _classic_ that Forever uses, check your Battle.net app if unsure).
+1. Find your WoW Forever folder, _forever_, inside your World of Warcraft
+   folder (the Battle.net app's Show in Explorer opens it).
 2. Open its Interface\AddOns folder.
 3. Copy this whole QuestPaceLog folder in there, so you end up with
    Interface\AddOns\QuestPaceLog\QuestPaceLog.toc and QuestPaceLog.lua.
-4. If it does not show up in the in-game AddOns list, open that list and
-   enable "Load out of date AddOns", since Forever's interface version
-   number can change between beta builds.
+4. If it does not show up in the in-game AddOns list after a game update,
+   open that list and enable "Load out of date AddOns" until the addon
+   catches up with the new interface version.
 
 Use.
 1. Log in on the character you want to track. A session starts on its own,
@@ -30,8 +30,7 @@ Use.
    quests you leveled up during.
 
 /reload does not start a new session, you'll see "Reload detected,
-continuing the session" instead, so long as the beta's SavedVariables bug
-(next section) hasn't already wiped what was there. /qpl start still works
+continuing the session" instead. /qpl start still works
 if you ever want to force a new session on purpose without logging out, say
 after a long AFK break.
 
@@ -211,7 +210,7 @@ Known limitation.
 This uses QUEST_ACCEPTED, QUEST_TURNED_IN, QUEST_WATCH_LIST_CHANGED,
 PLAYER_XP_UPDATE, ENCOUNTER_END, PLAYER_UPDATE_RESTING, PLAYER_LEVEL_UP, UNIT_AURA (your own buffs only), GROUP_ROSTER_UPDATE (group size only), PLAYER_DEAD, PLAYER_ALIVE, PLAYER_UNGHOST, PLAYER_MONEY, the zone change events, QUEST_DETAIL, and your own XP and system messages, plus the game's own quest log functions to read each quest's level. All of these
 are long-standing, widely used events, the same ones dungeon and XP addons
-have relied on for years, but Forever is still in beta, so if any of them
+have relied on for years, but WoW Forever is new, so if any of them
 stops firing or fires with different data, the affected part will just go
 quiet, nothing will error loudly. If a session's data looks incomplete, say
 so and the event names can be checked against whatever's changed.

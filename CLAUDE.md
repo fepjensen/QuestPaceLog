@@ -13,7 +13,7 @@ Felips is a lawyer building a career in game design criticism, not a programmer.
 - **Tests for every change.** `luajit tests/run_tests.lua` from the repo root (LuaJIT runs Lua 5.1 code, installed with winget). Add a test for each new behavior. The tests stub the WoW API, so they prove the logic, not the client. Say so when reporting.
 - **Unknown API, check in game.** The Forever client reports interface version 16001 and its exact API isn't documented. It runs the modern (retail engine) interface, with ObjectiveTrackerFrame, Edit Mode and the quest log on the world map, seen in `Logs\EditMode.log` and a screenshot on 2026-10-05. Write new code defensively (check a function exists, use pcall where a call might fail) and tell Felips which chat line or `/dump` command confirms it works.
 - **Version and changelog.** Bump `## Version` in `QuestPaceLog/QuestPaceLog.toc` for each release and add a CHANGELOG entry.
-- **Don't touch the WTF folder.** Never edit or delete anything under `F:\World of Warcraft\_classic_beta_\WTF`. The game writes the saved files, and Felips keeps dated backups there.
+- **Don't touch the WTF folder.** Never edit or delete anything under `F:\World of Warcraft\_forever_\WTF`, the launch client's. The game writes the saved files, and Felips keeps dated backups there. The beta client's WTF folder, with all raw beta data, was removed with the beta by 2026-11-01. The only surviving beta record is the summary in the portfolio repo, `src/data/lab/questpacelog.json`, exported 2026-10-03.
 - **Ask before** installing software, creating links or files outside this repo, or pushing anywhere.
 - **Writing style for anything Felips will read** (chat lines, README, commit messages, your replies). No em dashes and no colons in prose. Use periods and commas instead. Existing chat lines follow this already, for example "Resting ends, 1:05."
 
@@ -29,4 +29,4 @@ Felips is a lawyer building a career in game design criticism, not a programmer.
 
 ## Deploying
 
-The game loads the addon from `F:\World of Warcraft\_classic_beta_\Interface\AddOns\QuestPaceLog`. That folder is a directory junction to this repo's `QuestPaceLog/` folder, made by `deploy.ps1`, so edits show up after `/reload` with no copy step. Never delete the junction's contents. To remove it, delete only the link, as the comment in `deploy.ps1` shows.
+The launch client (WoW Forever 1.60.1, interface 16001) loads the addon from `F:\World of Warcraft\_forever_\Interface\AddOns\QuestPaceLog`. That folder is a directory junction to this repo's `QuestPaceLog/` folder, made by `deploy.ps1`, so edits show up after `/reload` with no copy step. Never delete the junction's contents. To remove it, delete only the link, as the comment in `deploy.ps1` shows.
