@@ -15,6 +15,7 @@ Adventurer's Almanac keeps a record of how you actually play. It times every que
 - **Records and goals.** Your best XP a minute on a quest, your best session, a level goal with a countdown, and each level compared with the one before.
 - **For explorers,** discoveries and their XP, flight paths, places visited, the quests that sent you farthest, and a journal of the quest text you read.
 - **A share card,** a short summary of your session you can copy and post yourself.
+- **A full report on the web.** Pick your saved file on the [Lab page](https://fjportfolio.com/lab/questpacelog) and your browser makes a report to download, keep or print. Your file is never uploaded.
 
 ## Privacy
 
@@ -30,15 +31,17 @@ To install by hand, download the zip from [Releases](https://github.com/fepjense
 
 | Command | What it does |
 |---|---|
-| `/almanac` or `/qpl show` | Opens the dashboard |
+| `/almanac` or `/qpl` | Opens the dashboard, `/qpl show all` for every session |
+| `/qpl log` | This session's quests in chat |
 | `/qpl report` | Prints this session's summary in chat, `/qpl report all` for every session |
 | `/qpl type` | Opens the welcome window to pick your player type |
-| `/qpl options` | Opens the settings |
+| `/qpl options` | Opens the settings, tracker lines and size, quest timers, chat lines, dashboard size, minimap button |
 | `/qpl goal 20` | Sets a level goal, with an optional date like `/qpl goal 20 2026-12-01` |
 | `/qpl eta` | Time to the next level at this session's pace |
 | `/qpl records` | Your personal records |
 | `/qpl journal` and part of a name | The text of a quest you accepted |
 | `/qpl card` | Your share card, selected to copy |
+| `/qpl export` | The full report in a window, selected to copy, `/qpl export all` for every session |
 | `/qpl cheer off` | Turns off the record, level and goal messages |
 | `/qpl diag` | What the addon found in the game's quest frames, for bug reports |
 

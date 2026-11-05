@@ -17,7 +17,8 @@ QuestPaceLogDB = {
   records  = { [key] = { value, at, label, session }, ... },                    -- 2.0, keys below
   goal     = { level, by, byStr, setAt, setLevel } or nil,                     -- 2.0, from /qpl goal
   settings = { cheer, lens, hud, archetype, welcomed, keptType, suggestedAt,     -- 2.0, see Settings below
-               hudStats, hudCollapsed, timersInLog, timersInTracker },
+               hudStats, hudCollapsed, timersInLog, timersInTracker,
+               windowPos, windowScale, hudScale, hudLocked, minimapAngle, minimapHidden, chat },  -- 4.0
 }
 ```
 
@@ -136,6 +137,13 @@ The player's choices. Nothing here is play data, and the export to the site leav
 | hudStats | { [stat] = true } for the tracker lines the player picked, nil to follow their type. Stats are xpbar, eta, xpmin, goal, quests, played, rest, gold, discoveries, flight, group, grouped, kills, deaths, timers (2.2) |
 | hudCollapsed | true when the tracker is collapsed to its header (2.2) |
 | timersInLog, timersInTracker | false turns off the quest timers in the map's quest log or the objective tracker (2.2) |
+| windowPos | { x, y }, the dashboard's top left corner in screen units from the bottom left of the screen, saved when it's dragged (4.0) |
+| windowScale | the dashboard's size, 0.7 to 1.5, nil for 1 (4.0) |
+| hudScale | the on-screen tracker's size, 0.7 to 1.5, nil for 1 (4.0) |
+| hudLocked | true stops the tracker from being dragged (4.0) |
+| minimapAngle | the minimap button's place on the minimap's edge, in degrees, nil for 220 (4.0) |
+| minimapHidden | true hides the minimap button (4.0) |
+| chat | false turns off the event lines in chat, accepts, turn-ins, resting, groups, deaths and the like. Records and goals follow `cheer` (4.0) |
 
 ## Colors
 

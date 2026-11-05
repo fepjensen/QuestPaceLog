@@ -44,10 +44,29 @@ local function newWorld(opts)
     _G.SlashCmdList = {}
     _G.print = function(msg) table.insert(W.printed, (tostring(msg):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))) end
     local handler
-    -- A fake frame that accepts any method. It keeps the event handler, and
-    -- the window's text, so tests can check what the window shows.
-    local function fakeFrame()
-        local f = {}
+    -- A fake frame that accepts any method. It keeps the event handler, the
+    -- window's text, and its place, size, parent and font, so tests can check
+    -- what the window shows and the layout check can measure it.
+    local function fakeFrame(kind, parent, template, name)
+        local f = { _kind = kind or "Frame", _parent = parent, _template = template, _name = name, _points = {} }
+        table.insert(W.objects, f)
+        f.SetPoint = function(self, point, a, b, c, d)
+            local rel, relPoint, x, y
+            if type(a) == "number" then rel, relPoint, x, y = nil, point, a, b
+            elseif type(a) == "table" then rel, relPoint, x, y = a, b or point, c, d
+            elseif type(b) == "string" then rel, relPoint, x, y = "root", b, c, d
+            else rel, relPoint, x, y = nil, point, 0, 0 end
+            table.insert(self._points, { point = point, rel = rel, relPoint = relPoint, x = x or 0, y = y or 0 })
+        end
+        f.ClearAllPoints = function(self) self._points = {}; self._all = nil end
+        f.SetAllPoints = function(self, rel) self._all = rel or "parent" end
+        f.SetWidth = function(self, w) self.w = w end
+        f.SetHeight = function(self, h) self.h = h end
+        f.SetWordWrap = function(self, wrap) self._nowrap = not wrap end
+        f.SetFontObject = function(self, font) self._template = font end
+        f.SetJustifyH = function(self, j) self._justify = j end
+        f.SetScale = function(self, v) self.scale = v end
+        f.GetParent = function(self) return self._parent end
         f.SetScript = function(self, what, fn)
             if what == "OnEvent" then handler = fn end
             if what == "OnEnter" then table.insert(W.hovers, function() fn(self) end) end
@@ -61,15 +80,15 @@ local function newWorld(opts)
         f.Show = function(self) self.shown = true end
         f.Hide = function(self) self.shown = false end
         f.IsShown = function(self) return self.shown end
-        f.CreateFontString = function() return fakeFrame() end
-        f.CreateTexture = function() return fakeFrame() end
+        f.CreateFontString = function(self, _, _, font) return fakeFrame("FontString", self, font) end
+        f.CreateTexture = function(self) return fakeFrame("Texture", self) end
         -- Like a real frame, only methods (capitalized names) exist, other fields stay nil.
         return setmetatable(f, { __index = function(_, k) if type(k) == "string" and k:match("^%u") then return function() end end end })
     end
-    W.missingTemplates, W.texts, W.hovers = {}, {}, {}
-    _G.CreateFrame = function(_, name, _, template)
+    W.missingTemplates, W.texts, W.hovers, W.objects = {}, {}, {}, {}
+    _G.CreateFrame = function(kind, name, parent, template)
         if template and (W.missingTemplates == "all" or W.missingTemplates[template]) then error("Couldn't find inherited node " .. template) end
-        local f = fakeFrame()
+        local f = fakeFrame(kind, parent, template, name)
         if name then _G[name] = f end
         return f
     end
@@ -244,7 +263,7 @@ test("report runs without errors and mentions quest difficulty", function()
     W.addQuest(600, "Quest", 8)
     W.fire("QUEST_ACCEPTED", 600)
     W.cmd("report")
-    W.cmd("")
+    W.cmd("log")
     assert(W.saw("Quests tracked for difficulty"), "difficulty line in report")
 end)
 
@@ -262,7 +281,7 @@ test("accept and turn-in record the zone, subzone and map", function()
     eq(e.acceptedMapID, 2248, "accepted map")
     eq(e.turnedInZone, "Undercity", "turned in zone")
     eq(QuestPaceLogDB.quests[700].turnedInSubZone, "Magic Quarter", "zone on the quest record")
-    W.cmd("")
+    W.cmd("log")
     assert(W.saw("Brill, Tirisfal Glades to Magic Quarter, Undercity"), "zones in the log line")
 end)
 
@@ -423,7 +442,7 @@ test("/qpl report all covers every session, without overnight gaps", function()
     local W = newWorld()
     twoSessions(W)
     W.cmd("report all")
-    assert(W.saw("all 2 sessions since"), "all-sessions header")
+    assert(W.saw("Report, 2 sessions since"), "all-sessions header")
     assert(W.saw("Quests logged, 2."), "quests from both sessions")
     assert(W.saw("Average time per quest, 3:00."), "average across both")
     assert(not W.saw("Gaps measured"), "the overnight wait isn't a gap")
@@ -432,15 +451,19 @@ test("/qpl report all covers every session, without overnight gaps", function()
     assert(W.saw("Quests logged, 1."), "plain report is still this session only")
 end)
 
-test("/qpl show opens a window with the report, both views", function()
+test("/qpl show opens the dashboard, and the Export window has the report for each scope", function()
     local W = newWorld()
     twoSessions(W)
     W.cmd("show overview")
-    assert(W.lastText and W.lastText:find("Quests logged, 1.", 1, true), "this session in the window")
-    assert(not W.lastText:find("|c", 1, true), "color codes stripped")
-    W.cmd("show all overview")
-    assert(W.lastText:find("Quests logged, 2.", 1, true), "all sessions in the window")
+    eq(_G.QuestPaceLogFrame.shown, true, "dashboard open")
     eq(UISpecialFrames[1], "QuestPaceLogFrame", "Escape closes it")
+    W.cmd("export")
+    assert(W.lastText and W.lastText:find("Quests logged, 1.", 1, true), "this session in the Export window")
+    assert(not W.lastText:find("|c", 1, true), "color codes stripped")
+    W.cmd("export all")
+    assert(W.lastText:find("Quests logged, 2.", 1, true), "all sessions in the Export window")
+    _G.QuestPaceLogExportButton.OnClick()
+    assert(W.lastText:find("Quests logged, 1.", 1, true), "the dashboard's Export button opens it for the scope shown")
 end)
 
 test("the window still opens when the client lacks the templates", function()
@@ -448,7 +471,9 @@ test("the window still opens when the client lacks the templates", function()
     W.missingTemplates = "all"
     twoSessions(W)
     W.cmd("show overview")
-    assert(W.lastText and W.lastText:find("Quests logged, 1.", 1, true), "plain window shows the report")
+    assert(W.texts["1"] and W.texts["Quests turned in"], "plain window shows the figures")
+    W.cmd("export")
+    assert(W.lastText and W.lastText:find("Quests logged, 1.", 1, true), "plain Export window shows the report")
     assert(not W.saw("couldn't open"), "no failure message")
 end)
 
@@ -472,7 +497,7 @@ test("dashboard tiles and bars show the right numbers, and refresh on turn-in", 
     QuestPaceLogDB.sessions[1].entries[1].colorAtTurnIn = nil
     W.cmd("show all overview")
     assert(shown(W, "1 yellow\n1 not recorded"), "turn-ins from before colors were recorded")
-    assert(W.texts["Second Day"] and W.texts["4:00, 25 XP a minute"], "recent quest row with XP a minute")
+    assert(W.texts["Second Day"] and W.texts["4:00"] and W.texts["25"], "recent quest row, its time and XP a minute")
     W.cmd("show overview")
     W.texts = {}
     W.addQuest(902, "Third Quest", 8)
@@ -528,7 +553,8 @@ test("time played at each level, from the start level through level-ups", functi
     eq(QuestPaceLogDB.sessions[1].startLevel, 8, "start level saved")
     eq(QuestPaceLogDB.sessions[1].levelUps[1].level, 9, "level-up saved")
     W.cmd("report")
-    assert(W.saw("Time played at each level, level 8 10:00, level 9 5:00. Estimated"), "level times in the report")
+    assert(W.saw("Time played at each level, level 8 10:00, level 9 5:00."), "level times in the report")
+    assert(not W.saw("Estimated levels"), "no note about estimates when nothing is estimated")
     W.cmd("show overview")
     assert(W.texts["10m"] and W.texts["5m"], "level columns in the window")
 end)
@@ -555,10 +581,15 @@ end)
 
 test("the window is never taller than the screen", function()
     local W = newWorld()
-    _G.UIParent = { GetHeight = function() return 700 end }
+    _G.UIParent = { GetHeight = function() return 600 end }
     twoSessions(W)
     W.cmd("show overview")
-    eq(_G.QuestPaceLogFrame.h, 680, "clamped to the screen")
+    eq(_G.QuestPaceLogFrame.h, 664, "the window keeps its layout")
+    assert(math.abs(_G.QuestPaceLogFrame.scale - 580 / 664) < 1e-9, "and scales down to fit the screen")
+    QuestPaceLogDB.settings.windowScale = 1.5
+    _G.QuestPaceLogFrame = nil
+    W.cmd("options")
+    assert(_G.QuestPaceLogOptions.scale < 1, "the settings window fits too")
     _G.UIParent = nil
 end)
 
@@ -635,6 +666,21 @@ test("discoveries and flight paths from the game's own lines, counted once", fun
     eq(#s.flightPaths, 1, "flight path")
     W.cmd("report")
     assert(W.saw("Places discovered this session, 1, worth 70 XP. Flight paths learned, 1."), "report line")
+end)
+
+test("a discovery's on-screen notice and its XP line merge into one, either order", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.fire("UI_INFO_MESSAGE", 0, "Discovered: Agamand Mills")
+    W.fire("CHAT_MSG_COMBAT_XP_GAIN", "Discovered Agamand Mills: 70 experience gained")
+    W.clock = W.clock + 60
+    W.fire("CHAT_MSG_COMBAT_XP_GAIN", "Discovered Brill: 90 experience gained")
+    W.fire("UI_INFO_MESSAGE", 0, "Discovered: Brill")
+    local s = QuestPaceLogDB.sessions[1]
+    eq(#s.discoveries, 2, "one discovery each")
+    eq(s.discoveries[1].xp, 70, "XP joined to the notice that came first")
+    eq(s.discoveries[2].xp, 90, "XP kept when the notice comes second")
+    eq(s.killXP or 0, 0, "discovery XP isn't counted as kill XP")
 end)
 
 test("places and the zones each open quest takes you through", function()
@@ -742,7 +788,7 @@ test("the card is a short summary to copy, nothing is sent", function()
     local W = newWorld()
     twoSessions(W)
     W.cmd("card")
-    assert(shown(W, "Adventurer's Almanac, session of") and shown(W, "1 quests turned in"), "card text in the window")
+    assert(shown(W, "Adventurer's Almanac, session of") and shown(W, "1 quest turned in"), "card text in the window")
 end)
 
 test("every lens draws, and the window opens on the lens your play leans to", function()
@@ -755,8 +801,14 @@ test("every lens draws, and the window opens on the lens your play leans to", fu
         W.cmd("show " .. lens)
     end
     assert(not W.saw("couldn't draw"), "every lens drew without an error")
-    assert(shown(W, "you play most like"), "compass tile")
-    assert(shown(W, "Achiever (you)"), "dominant lens marked")
+    assert(shown(W, "You play most like"), "compass tile")
+    assert(not shown(W, "Achiever (you)"), "no tab claims to be you before a type is picked")
+    assert(_G.QuestPaceLogPickType.shown, "a button to pick one instead")
+    QuestPaceLogDB.settings.archetype = "auto"
+    W.cmd("show compass")
+    assert(shown(W, "Achiever (you)"), "letting play decide marks the lens it leans to")
+    assert(not _G.QuestPaceLogPickType.shown, "no pick button once decided")
+    QuestPaceLogDB.settings.archetype = nil
     eq(QuestPaceLogDB.settings.lens, nil, "no choice saved from commands")
     -- A fresh window with no saved choice opens on the Compass's pick.
     local W2 = newWorld({ db = QuestPaceLogDB })
@@ -781,10 +833,10 @@ test("the on-screen tracker shows your lens and the 3 newest open quests with ti
     assert(W.texts["Newest"] and W.texts["1:00"] and W.texts["Middle"] and W.texts["3:00"], "newest three with live timers")
     assert(not W.texts["Old"], "only three quests")
     assert(W.texts["+1 more in your log"], "the rest counted")
-    assert(W.texts["Set a goal with /qpl goal 20"], "achiever lines")
+    assert(W.texts["none, /qpl goal 20"], "achiever lines")
     QuestPaceLogDB.settings.hudStats = { kills = true, deaths = true, timers = true }
     hud.OnUpdate(hud, 1.5)
-    assert(W.texts["Kills 0, 0 an hour"], "competitor lines")
+    assert((W.texts["Kills"] and W.texts["0, 0 an hour"]), "competitor lines")
     W.cmd("hud off")
     eq(hud.shown, false, "hidden")
     W.cmd("hud on")
@@ -899,7 +951,7 @@ test("you pick what the tracker shows in the settings window", function()
     W.fire("PLAYER_ENTERING_WORLD", true, false)
     local hud = _G.QuestPaceLogHUD
     hud.OnUpdate(hud, 1.5)
-    assert(W.texts["Set a goal with /qpl goal 20"], "achiever default shows the goal")
+    assert(W.texts["none, /qpl goal 20"], "achiever default shows the goal")
     W.cmd("options")
     eq(_G.QuestPaceLogOptions.shown, true, "settings open")
     local kills = _G.QuestPaceLogOptionsStat_kills
@@ -913,8 +965,8 @@ test("you pick what the tracker shows in the settings window", function()
     eq(QuestPaceLogDB.settings.hudStats.xpbar, true, "the rest of the type's choices kept")
     W.texts = {}
     hud.OnUpdate(hud, 1.5)
-    assert(W.texts["Kills 0, 0 an hour"], "kills on the tracker")
-    assert(not W.texts["Set a goal with /qpl goal 20"], "goal gone from the tracker")
+    assert((W.texts["Kills"] and W.texts["0, 0 an hour"]), "kills on the tracker")
+    assert(not W.texts["none, /qpl goal 20"], "goal gone from the tracker")
     _G.QuestPaceLogOptionsReset.OnClick()
     eq(QuestPaceLogDB.settings.hudStats, nil, "back to the type's choices")
     local cheer = _G.QuestPaceLogOptionsCheer
@@ -932,10 +984,10 @@ test("the tracker's minus collapses it to its header", function()
     W.texts = {}
     hud.OnUpdate(hud, 1.5)
     assert(W.texts["+"], "plus to expand again")
-    assert(not W.texts["Set a goal with /qpl goal 20"], "stats hidden while collapsed")
+    assert(not W.texts["none, /qpl goal 20"], "stats hidden while collapsed")
     _G.QuestPaceLogHUDToggle.OnClick()
     hud.OnUpdate(hud, 1.5)
-    assert(W.texts["Set a goal with /qpl goal 20"], "stats back after expanding")
+    assert(W.texts["none, /qpl goal 20"], "stats back after expanding")
 end)
 
 -- A fake piece of the game's UI. Frames have regions and children, font strings have text.
@@ -1192,6 +1244,285 @@ test("tracker titles wrapped in the game's color codes still get their timer", f
     W.cmd("diag")
     assert(W.saw("With a timer, \"[15] Arugal's Folly\""), "diag shows the title as it reads")
     _G.QuestObjectiveTracker, _G.ObjectiveTrackerFrame = nil, nil
+end)
+
+
+-- The layout check. Measures every shown piece of a window, using average
+-- character widths for the game's fonts, and lists what overflows its space,
+-- overlaps other text, or sticks out of the window. Text sizes are estimates,
+-- so it allows a few pixels either way.
+local FONT_METRICS = { { "Small", 5.3, 11 }, { "Large", 8.2, 16 }, { "Huge", 10, 20 } }
+local function metrics(font)
+    font = tostring(font or "")
+    for _, m in ipairs(FONT_METRICS) do if font:find(m[1]) then return m[2], m[3] end end
+    return 6.3, 13
+end
+
+local function visibleText(o)
+    return ((o.shownText or ""):gsub("|T.-|t", "WW"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
+end
+
+local function measure(o)
+    if o._kind ~= "FontString" then return o.w or 0, o.h or 0, 0 end
+    local text = visibleText(o)
+    if text == "" then return o.w or 0, 0, 0 end
+    local cw, lh = metrics(o._template)
+    local lines, natural = 0, 0
+    for line in (text .. "\n"):gmatch("(.-)\n") do
+        local width = #line * cw
+        natural = math.max(natural, width)
+        if o.w and o.w > 0 and not o._nowrap then lines = lines + math.max(1, math.ceil(width / o.w)) else lines = lines + 1 end
+    end
+    return (o.w and o.w > 0) and o.w or natural, lines * lh, natural
+end
+
+local function anchorAt(r, point)
+    local x = point:find("LEFT") and r.l or (point:find("RIGHT") and r.r or (r.l + r.r) / 2)
+    local y = point:find("TOP") and r.t or (point:find("BOTTOM") and r.b or (r.t + r.b) / 2)
+    return x, y
+end
+
+local function rectOf(o, root, cache)
+    if cache[o] then return cache[o] end
+    local w, h = measure(o)
+    local parent = o._parent
+    local r
+    if o == root or not parent then
+        r = { l = 0, t = 0, r = w, b = -h }
+    elseif o._all then
+        local base = rectOf(o._all == "parent" and parent or o._all, root, cache)
+        r = { l = base.l, t = base.t, r = base.r, b = base.b }
+    elseif #o._points == 0 then
+        local base = rectOf(parent, root, cache)
+        r = { l = base.l, t = base.t, r = base.l + w, b = base.t - h }
+    else
+        local edges = {}
+        for _, pt in ipairs(o._points) do
+            local rel = pt.rel == "root" and root or (pt.rel or parent)
+            local ax, ay = anchorAt(rectOf(rel, root, cache), pt.relPoint)
+            ax, ay = ax + pt.x, ay + pt.y
+            local p = pt.point
+            if p:find("LEFT") then edges.l = ax elseif p:find("RIGHT") then edges.r = ax else edges.cx = ax end
+            if p:find("TOP") then edges.t = ay elseif p:find("BOTTOM") then edges.b = ay else edges.cy = ay end
+        end
+        local l = edges.l or (edges.r and edges.r - w) or (edges.cx and edges.cx - w / 2) or 0
+        local rr = edges.r or l + w
+        local t = edges.t or (edges.b and edges.b + h) or (edges.cy and edges.cy + h / 2) or 0
+        local b = edges.b or t - h
+        if edges.l and edges.r == nil and edges.cx == nil then rr = l + w end
+        r = { l = l, t = t, r = rr, b = b }
+    end
+    cache[o] = r
+    return r
+end
+
+local function shownIn(o, root)
+    local x = o
+    while x do
+        if x.shown == false then return false end
+        if x == root then return true end
+        x = x._parent
+    end
+    return false
+end
+
+local function label(o)
+    return o._kind .. (o._name and (" " .. o._name) or "") .. (o.shownText and (" \"" .. visibleText(o):sub(1, 40) .. "\"") or "")
+end
+
+local function layoutProblems(W, root)
+    local problems, cache, texts = {}, {}, {}
+    local box = rectOf(root, root, cache)
+    local slack = 3
+    for _, o in ipairs(W.objects) do
+        if o ~= root and shownIn(o, root) and not (o._name and o._name:find("Tab%d+$")) then
+            local r = rectOf(o, root, cache)
+            local w, _, natural = measure(o)
+            if r.r - r.l > 0 or r.t - r.b > 0 then
+                if r.l < box.l - slack or r.r > box.r + slack or r.t > box.t + slack or r.b < box.b - slack then
+                    table.insert(problems, label(o) .. " sticks out of the window")
+                end
+            end
+            if o._kind == "FontString" and visibleText(o) ~= "" then
+                local ink = { l = r.l, r = r.r, t = r.t, b = r.b }
+                if o.w and natural < o.w then
+                    if o._justify == "RIGHT" then ink.l = r.r - natural
+                    elseif o._justify == "CENTER" then ink.l = (r.l + r.r - natural) / 2; ink.r = ink.l + natural
+                    else ink.r = r.l + natural end
+                end
+                table.insert(texts, { o = o, r = ink })
+                if o._nowrap and o.w and natural > o.w + slack then
+                    table.insert(problems, label(o) .. " is cut off, it needs " .. math.floor(natural) .. " of " .. o.w .. " pixels")
+                end
+                local p = o._parent
+                if p and p ~= root and (p.w or 0) > 0 and (p.h or 0) > 0 then
+                    local pr = rectOf(p, root, cache)
+                    if r.l < pr.l - slack or r.r > pr.r + slack or r.t > pr.t + slack or r.b < pr.b - slack then
+                        table.insert(problems, label(o) .. " spills out of its card")
+                    end
+                end
+            end
+        end
+    end
+    for _, o in ipairs(W.objects) do
+        if o._kind == "Button" and o.shownText and o.w and shownIn(o, root) and not (o._name and o._name:find("Tab%d+$")) then
+            local need = #visibleText(o) * 6.3 + 12
+            if need > o.w + slack then table.insert(problems, label(o) .. " doesn't fit its button, it needs " .. math.floor(need) .. " of " .. o.w .. " pixels") end
+        end
+        local text = o.shownText and shownIn(o, root) and visibleText(o)
+        if text and text ~= "" then
+            local lower = text:lower()
+            for _, bad in ipairs({ "n/a", "(s)", "(es)", "%d", "%s" }) do
+                if lower:find(bad, 1, true) then table.insert(problems, label(o) .. " shows " .. bad) end
+            end
+            for _, bad in ipairs({ "nil", "nan", "inf" }) do
+                if lower:find("%f[%a]" .. bad .. "%f[%A]") then table.insert(problems, label(o) .. " shows " .. bad) end
+            end
+            for word in (" " .. text):gmatch("[^%w%.]1%s+(%a+)") do
+                if #word > 3 and word:find("[^su]s$") then table.insert(problems, label(o) .. " says 1 " .. word) end
+            end
+            if text:find("version %d") or text:find("from %d%.%d") then table.insert(problems, label(o) .. " mentions a version number") end
+        end
+    end
+    for i = 1, #texts do
+        for j = i + 1, #texts do
+            local a, b = texts[i].r, texts[j].r
+            if a.l < b.r - slack and b.l < a.r - slack and a.b < b.t - slack and b.b < a.t - slack then
+                table.insert(problems, label(texts[i].o) .. " overlaps " .. label(texts[j].o))
+            end
+        end
+    end
+    return problems
+end
+
+local function assertLayout(W, root, what)
+    local problems = layoutProblems(W, root)
+    if #problems > 0 then error(what .. ", " .. #problems .. " layout problems\n      " .. table.concat(problems, "\n      "), 2) end
+end
+
+-- A full world for the layout check. Long quest titles, levels, kills,
+-- deaths, discoveries, a group, and enough play for the Compass.
+local function busyWorld()
+    local W = newWorld({ level = 8 })
+    QuestPaceLogDB = { sessions = {}, settings = { archetype = "explorer", welcomed = true } }
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    local titles = { "At War With The Scarlet Crusade", "Galgar's Cactus Apple Surprise", "The Prodigal Lich Returns",
+        "That Shadowvale Green Elixir", "Deaths in the Family", "Rude Awakening", "A Letter Undelivered", "Sting of the Scorpid",
+        "Return to the Magistrate", "Proving Your Worth Again" }
+    for i = 1, 24 do
+        local title = titles[(i - 1) % #titles + 1]
+        W.addQuest(5000 + i, title, 8 + (i % 4))
+        W.fire("QUEST_ACCEPTED", 5000 + i)
+        W.clock = W.clock + 170 + i * 7
+        W.fire("CHAT_MSG_COMBAT_XP_GAIN", "Scarlet Zealot dies, you gain 85 experience.")
+        W.removeQuest(5000 + i)
+        W.fire("QUEST_TURNED_IN", 5000 + i, 450 + i, 120)
+        if i % 6 == 0 then W.level = W.level + 1; W.fire("PLAYER_LEVEL_UP", W.level) end
+    end
+    W.fire("CHAT_MSG_SYSTEM", "Discovered Agamand Mills: 70 experience gained")
+    W.addQuest(5900, "Proving Your Worth Again", 10)
+    W.fire("QUEST_ACCEPTED", 5900)
+    for _, z in ipairs({ { "Undercity", "Trade Quarter" }, { "Silverpine Forest", "The Sepulcher" }, { "Hillsbrad Foothills", "Tarren Mill" } }) do
+        W.clock = W.clock + 300
+        W.zone, W.subZone = z[1], z[2]
+        W.fire("ZONE_CHANGED_NEW_AREA")
+    end
+    W.removeQuest(5900)
+    W.fire("QUEST_TURNED_IN", 5900, 800, 300)
+    W.zone, W.subZone = "Tirisfal Glades", "Brill"
+    _G.IsInInstance = function() return true, "party" end
+    _G.GetInstanceInfo = function() return "Scarlet Monastery Graveyard", "party", 1, "Normal" end
+    W.fire("PLAYER_ENTERING_WORLD", false, false)
+    W.clock = W.clock + 1500
+    W.fire("ENCOUNTER_END", 1, "Interrogator Vishas", 1, 5, 1)
+    W.fire("ENCOUNTER_END", 2, "Bloodmage Thalnos", 1, 5, 0)
+    W.clock = W.clock + 1400
+    _G.IsInInstance = function() return false, "none" end
+    W.fire("PLAYER_ENTERING_WORLD", false, false)
+    W.money = W.money + 123456; W.fire("PLAYER_MONEY")
+    W.money = W.money - 4321; W.fire("PLAYER_MONEY")
+    W.cmd("goal 20 2026-12-01")
+    W.fire("PLAYER_DEAD"); W.clock = W.clock + 95; W.fire("PLAYER_UNGHOST")
+    W.group = 3; W.fire("GROUP_ROSTER_UPDATE"); W.clock = W.clock + 600; W.group = 0; W.fire("GROUP_ROSTER_UPDATE")
+    for i = 1, 4 do W.addQuest(6000 + i, titles[i], 9); W.fire("QUEST_ACCEPTED", 6000 + i); W.clock = W.clock + 60 end
+    W.clock = W.clock + 3725
+    return W
+end
+
+test("layout check, the dashboard on every tab and both scopes", function()
+    local W = busyWorld()
+    for _, view in ipairs({ "overview", "achiever", "explorer", "socializer", "competitor", "compass",
+        "all overview", "all achiever", "all explorer", "all socializer", "all competitor", "all compass" }) do
+        W.cmd("show " .. view)
+        assert(not W.saw("couldn't draw"), view .. " drew without an error")
+        assertLayout(W, _G.QuestPaceLogFrame, "Dashboard, " .. view)
+    end
+    assert(shownIn(_G.QuestPaceLogKeepType, _G.QuestPaceLogFrame), "the Compass suggestion is part of what was checked")
+end)
+
+test("layout check, a brand new character on every tab", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.cmd("")
+    assert(_G.QuestPaceLogFrame and _G.QuestPaceLogFrame.shown, "/almanac on its own opens the dashboard")
+    local empty = {
+        overview = "Finish a quest and it shows up here, with its time and XP a minute.",
+        achiever = "Each level you play from start to finish in one session shows up here, against the one before.",
+        explorer = "Quests that take you through more than one zone show up here.",
+        socializer = "Groups you join show up here, with how long they lasted.",
+        competitor = "No deaths yet.",
+        compass = "Your scores appear after 10 minutes of play.",
+    }
+    for _, scope in ipairs({ "", "all " }) do
+        for _, lens in ipairs({ "overview", "achiever", "explorer", "socializer", "competitor", "compass" }) do
+            W.cmd("show " .. scope .. lens)
+            assertLayout(W, _G.QuestPaceLogFrame, "New character, " .. scope .. lens)
+            local seen = false
+            for _, o in ipairs(W.objects) do if o.shownText == empty[lens] and shownIn(o, _G.QuestPaceLogFrame) then seen = true end end
+            assert(seen, scope .. lens .. " says what fills it")
+        end
+    end
+    assert(W.texts["Level up once and each level's time shows up here."], "no column for a level still in progress")
+end)
+
+test("layout check, a short screen and the largest dashboard size", function()
+    local W = busyWorld()
+    _G.UIParent = { GetHeight = function() return 668 end }
+    QuestPaceLogDB.settings.windowScale = 1.5
+    W.cmd("show compass")
+    local f = _G.QuestPaceLogFrame
+    eq(f.h, 664, "same layout")
+    assert(f.scale * 664 <= 648, "scaled to fit the screen")
+    assertLayout(W, f, "Short screen")
+    W.cmd("options")
+    assertLayout(W, _G.QuestPaceLogOptions, "Settings on a short screen")
+    assert(_G.QuestPaceLogOptions.scale * 690 <= 648, "settings scaled to fit")
+    _G.UIParent = nil
+end)
+
+test("layout check, the welcome, settings and export windows", function()
+    local W = busyWorld()
+    W.cmd("type")
+    assertLayout(W, _G.QuestPaceLogWelcome, "Welcome window")
+    W.cmd("options")
+    assertLayout(W, _G.QuestPaceLogOptions, "Settings window")
+    W.cmd("export")
+    assertLayout(W, _G.QuestPaceLogExport, "Export window")
+    W.cmd("export all")
+    assertLayout(W, _G.QuestPaceLogExport, "Export window, every session")
+    W.cmd("card")
+    assertLayout(W, _G.QuestPaceLogExport, "Share card")
+end)
+
+test("layout check, the on-screen tracker with every line on", function()
+    local W = busyWorld()
+    QuestPaceLogDB.goal = { level = 20, setAt = W.clock, setLevel = 8 }
+    local all = {}
+    for _, key in ipairs({ "xpbar", "eta", "xpmin", "goal", "quests", "played", "rest", "gold", "discoveries", "flight", "group", "grouped", "kills", "deaths", "timers" }) do all[key] = true end
+    QuestPaceLogDB.settings.hudStats = all
+    local hud = _G.QuestPaceLogHUD
+    hud.OnUpdate(hud, 1.5)
+    assertLayout(W, hud, "Tracker")
 end)
 
 io.write(string.format("\n%d passed, %d failed\n", passed, failed))

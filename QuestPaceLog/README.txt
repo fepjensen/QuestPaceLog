@@ -1,102 +1,65 @@
 Adventurer's Almanac
 ====================
 
-Formerly QuestPaceLog. The folder keeps that name, so saved data from
-earlier versions keeps loading. Type /almanac or /qpl.
+Quest timers, leveling stats and your player type, for WoW Forever.
+Type /almanac to open it. Formerly QuestPaceLog, and the folder keeps that
+name so saved data from earlier versions keeps loading.
 
-What it does.
-Listens for the two events WoW Forever's own client already fires for your
-own actions, QUEST_ACCEPTED and QUEST_TURNED_IN, and timestamps them. It
-never reads hidden information, never automates anything, and never touches
-another player's data, so it sits inside a normal addon's allowed behavior,
-the same category as a log uploader or a quest tracker.
+Privacy.
+It records only your own character, on your own computer. It never reads
+other players, never automates anything and never sends data anywhere.
+Group stats are counts only, never names.
 
 Install.
-1. Find your WoW Forever folder, _forever_, inside your World of Warcraft
-   folder (the Battle.net app's Show in Explorer opens it).
-2. Open its Interface\AddOns folder.
-3. Copy this whole QuestPaceLog folder in there, so you end up with
-   Interface\AddOns\QuestPaceLog\QuestPaceLog.toc and QuestPaceLog.lua.
-4. If it does not show up in the in-game AddOns list after a game update,
-   open that list and enable "Load out of date AddOns" until the addon
-   catches up with the new interface version.
+The CurseForge app or the Wago app installs it and keeps it up to date.
+Choose WoW Forever as the game version. To install by hand, copy this
+QuestPaceLog folder into World of Warcraft\_forever_\Interface\AddOns, so
+you end up with Interface\AddOns\QuestPaceLog\QuestPaceLog.toc. If it
+doesn't show up after a game update, tick "Load out of date AddOns" in the
+game's AddOns list.
 
-Use.
-1. Log in on the character you want to track. A session starts on its own,
-   no command needed, you'll see "New session started" in chat.
-2. Play normally. Every quest accept and turn-in prints a line to chat with
-   its elapsed time from session start, and its duration once turned in.
-3. Type /qpl at any point to see the full list so far.
-4. Type /qpl report at the end of the session for a computed summary,
-   quest count, average duration, longest and shortest quest, the
-   average gap between one turn-in and the next accept, and how many
-   quests you leveled up during.
+Getting started.
+The first time you log in, a welcome window explains the four kinds of
+player Richard Bartle described, Achievers, Explorers, Socializers and
+Competitors, and asks which sounds like you. Your pick decides what the
+dashboard and the tracker show first. You can also let your play decide.
+/qpl type opens the window again.
 
-/reload does not start a new session, you'll see "Reload detected,
-continuing the session" instead. /qpl start still works
-if you ever want to force a new session on purpose without logging out, say
-after a long AFK break.
+The dashboard.
+/almanac, a click on the minimap button, or a click on the tracker opens it.
+Five figures across the top, then cards. The Overview shows where your
+experience comes from, the difficulty of the quests you turn in, your last
+eight quests with their time and XP a minute, and the time each level took.
+Each type has its own tab, and the Compass places your real play on Bartle's
+graph. The buttons at the top switch between this session and all time.
+Hover any figure to see what it counts. Export opens the full report,
+selected so Ctrl+C copies it, and its Card button swaps in a short summary
+you can post yourself.
 
-Each quest also records your character's level at accept and at turn-in,
-so the log and the report both show, for example, "level 4" when a quest
-didn't change your level, or "level 3 to 4" when it did.
+The on-screen tracker.
+A small panel, in combat too, with the lines you pick and your newest
+tracked quests, each with its timer. Drag it where you like, click it for
+the dashboard, right-click it for the settings.
 
-Backlog quests. Some quests get picked up and deliberately left alone, not
-actively worked toward, so their real accept-to-turn-in time is huge and
-meaningless as pace. A flagged quest still shows up in /qpl and in the
-report, marked backlog, but its time is left out of the average, longest,
-shortest, and gap numbers.
+Quest timers.
+Each tracked quest shows how long you've worked on it, after its title in
+the objective tracker and in the quest log on the map. The clock runs only
+while you play with the quest tracked. Untracking a quest parks it and
+pauses its clock, and logging out pauses every clock. Quests from before
+version 2.4 start from an estimate, shown with a ~.
 
-The easy way to flag one. Untrack it from your normal quest log or the
-on-screen objective tracker, the same click you'd already do to get a quest
-off your screen. QuestPaceLog notices and marks it backlog on its own, no
-command needed, you'll see a chat line confirming it. Track it again later
-and it goes back to counting toward pace, also on its own.
+Settings.
+Right-click the tracker or the minimap button, type /qpl options, or open
+the game's Options and look under AddOns. Pick the tracker's lines, size and
+lock, turn the quest timers and the chat lines on or off, size the
+dashboard, and show or hide the minimap button.
 
-This only works while the quest is still open in your log, since untracking
-is something you can only do to an open quest. For one you've already
-turned in, use the manual commands instead. Type /qpl skip right after
-accepting one to flag it, or /qpl skip <part of its name> to flag one you
-didn't catch in time, even one already turned in.
-
-Changed your mind, or picked one back up sooner than planned? /qpl unskip
-undoes the most recently flagged quest, or /qpl unskip <part of its name>
-targets a specific one. It goes back to counting toward pace normally. This
-works no matter which way the quest got flagged, by tracking it, by hand, or
-both.
-
-XP. Each quest's own turn-in reward now shows in the log and the report,
-for example "150 xp". The report also totals up all XP earned this session
-and splits it into XP from quest turn-ins against XP from everything else,
-kills, first-time discovery of an area, and so on. There isn't a reliable
-way to tell which specific kill's XP belongs to which specific quest, the
-game doesn't expose that to an addon, so this doesn't pretend to. The
-session-wide split is the honest version of that same question, roughly
-how much of your leveling came from quest content against incidental
-grinding.
-
-Dungeons. Entering and leaving a dungeon is logged the same way a quest is,
-with the time in between, your level at each end, and which bosses went
-down or wiped, from the game's own ENCOUNTER_END event. Shows up in
-/qpl report as its own section, name, difficulty, total time, boss count.
-
-Resting. WoW Forever flags your character as resting in a city, an inn, or
-near a campfire, all the same flag, this addon doesn't try to tell them
-apart. Each time that flag turns on and off gets logged, with a short chat
-line each way, and the report totals up how much of the session was spent
-resting and how many separate rest periods there were.
-
-Quest difficulty and reasons. Each quest now records its own level when
-you accept it, and the color the quest log gave it then, red, orange,
-yellow, green, or gray. Every time you level up, the addon checks your whole
-quest log and notes the level at which each quest turned green and the level
-at which it turned gray, with a short chat line when one goes gray. A quest
-that leaves your log without being turned in is noted as dropped. This works
-across sessions, so a quest parked on Monday and finished on Thursday still
-has one clean record. Quests that were already in your log when you
-installed this version get tracked from that moment on.
-
-When you park a quest, say why with /qpl why and a letter.
+Parked quests.
+Untrack a quest and it's marked backlog, so its time stays out of your
+averages. Track it again and it counts again. For a quest you already turned
+in, /qpl skip and part of its name marks it, /qpl unskip undoes it. Say why
+you parked one with /qpl why and a letter, then part of its name if it isn't
+the latest.
   a  too hard for my level
   b  objective scarce or contested
   c  out of my route
@@ -104,116 +67,36 @@ When you park a quest, say why with /qpl why and a letter.
   e  not worth it right now
   f  just untracked it, still doing it next
   g  don't remember
-/qpl why a tags the most recent backlog quest that has no reason yet.
-/qpl why b elixir tags the most recent quest with "elixir" in its name,
-even from an earlier session. /qpl report now ends with how many quests went
-gray while still in your log, how many of those you turned in anyway, and
-how many you dropped.
 
-Where. Every accept and turn-in now notes the zone and the named spot
-inside it, for example "Brill, Tirisfal Glades," and so does the start of
-every rest period. The /qpl log shows where a quest took you, like "Brill,
-Tirisfal Glades to Magic Quarter, Undercity."
+Campfires.
+The game flags a city, an inn and a campfire the same way, as resting. The
+addon tells a campfire apart by its camp buffs. Only "Boosted Rest" is
+watched at first. Sit at a fire, type /qpl buffs to see your buffs' names,
+then /qpl campbuff add and the name to watch another.
 
-Campfires. The game uses the same resting flag for a city, an inn and a
-campfire, so a rest period on its own can't tell them apart. Sitting at a
-WoW Forever campfire for a minute gives camp buffs, and the addon watches
-your own buffs for them. When one arrives during a rest period, that rest
-counts as a campfire rest, and its length is how long you stayed at the
-fire. /qpl report shows how many campfire stays you had and their average.
-Only "Boosted Rest" is watched at first. To add the others, sit at a fire,
-type /qpl buffs to see your buffs' exact names, then /qpl campbuff add
-followed by the name. /qpl campbuff on its own shows the list, and
-/qpl campbuff remove takes a name off it.
+Commands.
+  /almanac or /qpl         the dashboard, /qpl show all for every session
+  /qpl log                 this session's quests in chat
+  /qpl report              this session's summary in chat, /qpl report all
+  /qpl export              the full report in a window to copy
+  /qpl card                your share card, selected to copy
+  /qpl type                pick your player type
+  /qpl options             the settings
+  /qpl goal 20             a level goal, /qpl goal 20 2026-12-01 with a date
+  /qpl eta                 time to the next level at this session's pace
+  /qpl records             your personal records
+  /qpl journal and a name  the text of a quest you accepted
+  /qpl hud on or off       show or hide the tracker
+  /qpl cheer on or off     the record, level and goal messages
+  /qpl start               start a new session without logging out
+  /qpl diag                what the addon found in the game's quest frames
 
-Groups. Joining and leaving a group is logged with how long the group held
-together and how many people were in it, counting you. Only the count is
-kept, never who was in it. Each turn-in also notes the group size at that
-moment, so the turn-in line says "in a group of 3" when you weren't solo.
-/qpl report shows the session's groups, their average length, and how many
-turn-ins happened while grouped.
+Your data.
+Everything is saved in your SavedVariables folder, in QuestPaceLog.lua,
+a plain text file the game writes when you log out or reload.
 
-Dashboard. /qpl show, or a click on the book button by the minimap, opens
-a window you can move, scroll, and close with Escape. Drag the book button
-to put it wherever you like, the game remembers the spot. At the top, tiles show quests turned in, average time per quest,
-XP per minute played, time played, and time resting. Below them, three
-donut charts show where your XP came from, the colors your quests had at
-turn-in, and how many turn-ins were solo or in a group. Your last 8
-finished quests appear as bars in their quest color, with their XP a
-minute, so a slow one stands out. Hover one to see its details. Columns
-show the time you played at each level, from version 1.8 on. Drag the
-window's bottom right corner to make it taller or shorter. The full report is underneath. The
-window updates by itself when you turn in a quest while it's open. Its two buttons switch between this
-session and all sessions together. You can select the text in it and copy
-it with Ctrl+C. /qpl report all prints the all-sessions report in chat.
+Bugs and ideas.
+https://github.com/fepjensen/QuestPaceLog/issues
+Include the output of /qpl diag and a screenshot.
 
-Version 2.2, pick your type.
-The first time you log in, a welcome window explains the four types and
-asks which one sounds like you. Your type decides what the dashboard and
-the on-screen tracker show first. You can also let your play decide.
-/qpl type opens the window again, or /qpl type explorer (or achiever,
-socializer, competitor, auto) changes it straight away. The Compass keeps
-measuring how you actually play, and after an hour of play it tells you
-if you lean clearly toward another type, with a button to switch or keep.
-
-Settings. Right-click the tracker or the minimap button, press Settings
-on the dashboard, type /qpl options, or open the game's Options and look
-under AddOns. Pick which lines the tracker shows, turn the quest timers
-and cheer messages on or off, and change your type.
-
-Quest timers in the game's own quest list. Each open quest you track
-shows how long you've worked on it, in gray after its title, in the
-objective tracker and in the quest log on the map. The clock only runs
-while you're playing with the quest tracked. Untracking a quest parks it
-and pauses its clock, and logging out pauses every clock. Quests accepted
-before version 2.4 start from an estimate, shown with a ~. /qpl diag says which
-of the game's quest frames the addon found, if a timer doesn't show.
-
-Version 2.0, something for each kind of player.
-Richard Bartle described four kinds of player, Achievers, Explorers,
-Socializers and Killers. The dashboard has a lens for each, plus an
-Overview and a Compass. You don't have to pick one. After 10 minutes of
-play the window opens on the lens your play leans to, marked "(you)" in
-gold, and the Compass shows why, with a dot on Bartle's own graph. Pick
-another lens and the window remembers your choice.
-
-Achiever. XP a minute, quests an hour, time to the next level (/qpl eta),
-your goal (/qpl goal 20, or /qpl goal 20 2026-10-12, /qpl goal clear),
-your records (/qpl records), and each level against the one before.
-Explorer. Places discovered and their XP, flight paths, places visited,
-and the quests that sent you farthest. /qpl journal and part of a quest
-name shows the text of a quest you accepted.
-Socializer. Time grouped, groups, group quests and dungeon runs by group
-size. Only how many people, never who.
-Competitor. Kills, kills an hour, XP from kills, deaths and time spent
-dead. Your rival is your own past, other players are never recorded.
-
-Beating a record, finishing a level or nearing your goal says so in chat.
-/qpl cheer off turns those lines off, /qpl cheer on brings them back. The
-Card button, or /qpl card, selects a short summary of your session in the
-window so you can copy it with Ctrl+C and post it yourself.
-
-On-screen tracker. A small panel on your screen, in combat too, with the
-top lines from your lens and your 3 newest open quests with a timer each.
-Drag it where you like, click it to open the dashboard. /qpl hud off
-hides it, /qpl hud on brings it back.
-
-Getting the report out.
-The report prints to your chat window, so you can select and copy it from
-there. The raw data is also written to your SavedVariables file,
-WTF\Account\<your account>\<realm>\<character>\SavedVariables\QuestPaceLog.lua,
-a plain text Lua file, written the moment you reload the UI or log out.
-Paste either the chat report or that file's contents back into the project
-chat, and it turns into the written half of the case study, the average
-active and idle read, the framework tie-in, the counterargument. That part
-stays a human judgment call on purpose, the addon only removes the clock-
-watching.
-
-Known limitation.
-This uses QUEST_ACCEPTED, QUEST_TURNED_IN, QUEST_WATCH_LIST_CHANGED,
-PLAYER_XP_UPDATE, ENCOUNTER_END, PLAYER_UPDATE_RESTING, PLAYER_LEVEL_UP, UNIT_AURA (your own buffs only), GROUP_ROSTER_UPDATE (group size only), PLAYER_DEAD, PLAYER_ALIVE, PLAYER_UNGHOST, PLAYER_MONEY, the zone change events, QUEST_DETAIL, and your own XP and system messages, plus the game's own quest log functions to read each quest's level. All of these
-are long-standing, widely used events, the same ones dungeon and XP addons
-have relied on for years, but WoW Forever is new, so if any of them
-stops firing or fires with different data, the affected part will just go
-quiet, nothing will error loudly. If a session's data looks incomplete, say
-so and the event names can be checked against whatever's changed.
+Open source under the MIT License. Made by Felipe Jensen, fjportfolio.com.

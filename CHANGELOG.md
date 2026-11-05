@@ -1,5 +1,23 @@
 # Changelog
 
+## 4.0.0, 2026-11-05
+
+A new design, made to look and read like part of the game.
+
+- **Dashboard.** Five figures across the top, each with a colored mark and a hover tip that says what it counts. Cards with titles below, experience by source and quest difficulty as rings with legends, your last eight quests as a table with time and XP a minute, and the time each level took. A new character sees what fills each card instead of blanks. The window is shorter (800 by 664), remembers where you put it, and can be sized from 70 to 150% in the settings.
+- **Export window.** The full report moved out of the dashboard into its own window, selected to copy, with the share card one click away. The Export button, `/qpl export` and `/qpl export all` open it.
+- **Compass.** Each type's detail sits under its bar, so long lines no longer run past the card.
+- **Tracker.** Wider, with larger text, labels on the left and values on the right. Its size and a lock are in the settings.
+- **Settings.** Grouped into cards, the tracker (lines, size, lock, reset), quest timers, chat, and the dashboard (size, minimap button).
+- **Minimap button.** Sits on the minimap's edge like other addons' buttons and slides around it when dragged. It can be hidden.
+- **Chat lines can be turned off.** Accepts, turn-ins, resting, groups, deaths and the like, from the settings. Records and goals keep their own switch.
+- **Quest timers** in the game's objective tracker come back within a second when the game rebuilds it.
+- **`/almanac` or `/qpl` on its own opens the dashboard.** `/qpl log` prints this session's quests in chat, which the bare command used to do.
+- **Discoveries record their XP on the launch client.** It shows `Discovered: Brill` on screen without the XP and puts the XP line in the experience chat, so the addon now reads both and joins them into one discovery.
+- Window text speaks to players, no version numbers or commands where a sentence does.
+- `docs/DESIGN.md` sets the grid, type, colors, components and a review checklist. The tests now measure every window, tab and state and fail on text that overflows, overlaps or leaves its card or window.
+- New saved settings, `windowPos`, `windowScale`, `hudScale`, `hudLocked`, `minimapAngle`, `minimapHidden` and `chat`, listed in SCHEMA.md. No play data fields changed.
+
 ## 3.1.0, 2026-11-05
 
 - Renamed Adventurer's Almanac. Players see the new name in the AddOns list, window titles, the tracker, tooltips, the share card and the game's Options page, and chat lines carry an [Almanac] tag. /almanac works alongside /qpl.
