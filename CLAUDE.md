@@ -25,6 +25,8 @@ Felips is a lawyer building a career in game design criticism, not a programmer.
 - `CHANGELOG.md`
 - `tools/export_site.py` builds the site Lab page data file (schemaVersion 3) from every saved file and dated backup, read only. `python tools/test_export_site.py` checks it
 - `docs/LAUNCH.md` the plan for launch day (November 4) and for publishing the addon
+- `docs/LISTING.md` the CurseForge and Wago listing text and steps
+- `README.md` the public page for players, `.github/workflows/release.yml` builds and publishes a release when a version tag like v3.1.0 is pushed
 - `update-site.ps1` runs the export into `F:\Claude Code\portfolio`, checks the site builds, and commits and pushes (deploys) after Felips types y. With `-Auto` it publishes on its own, only when there's new play, the site builds and the portfolio has no unpushed commits of Felips'. The Windows scheduled task "Adventurer's Almanac site update" runs it with `-Auto` daily at 6:00, or at the next logon if the PC was off, logging to `logs/site-update.log` (git-ignored). Felips asked for this on 2026-11-05. To stop it, `Unregister-ScheduledTask -TaskName "Adventurer's Almanac site update"`
 
 ## Deploying
