@@ -1,8 +1,10 @@
 ## Interface: 16001
-## Title: Quest Pace Log
-## Notes: Tracks your quests, leveling, discoveries, groups and deaths, with a dashboard for each kind of player.
+## Title: Adventurer's Almanac
+## Notes: Quest timers, leveling stats and your player type, with a dashboard for each kind of player.
+## X-License: MIT
+## X-Website: https://github.com/fepjensen/QuestPaceLog
 ## Author: Felipe Jensen
-## Version: 3.0.0
+## Version: 3.1.0
 ## IconTexture: Interface\Icons\INV_Misc_Book_09
 ## SavedVariablesPerCharacter: QuestPaceLogDB
 

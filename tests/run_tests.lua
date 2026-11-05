@@ -742,7 +742,7 @@ test("the card is a short summary to copy, nothing is sent", function()
     local W = newWorld()
     twoSessions(W)
     W.cmd("card")
-    assert(shown(W, "QuestPaceLog, session of") and shown(W, "1 quests turned in"), "card text in the window")
+    assert(shown(W, "Adventurer's Almanac, session of") and shown(W, "1 quests turned in"), "card text in the window")
 end)
 
 test("every lens draws, and the window opens on the lens your play leans to", function()
@@ -777,7 +777,7 @@ test("the on-screen tracker shows your lens and the 3 newest open quests with ti
     local hud = _G.QuestPaceLogHUD
     hud.OnUpdate(hud, 1.5)
     assert(not W.saw("couldn't update"), "tracker updated without an error")
-    assert(W.texts["Quest Pace Log"], "tracker header")
+    assert(W.texts["Adventurer's Almanac"], "tracker header")
     assert(W.texts["Newest"] and W.texts["1:00"] and W.texts["Middle"] and W.texts["3:00"], "newest three with live timers")
     assert(not W.texts["Old"], "only three quests")
     assert(W.texts["+1 more in your log"], "the rest counted")

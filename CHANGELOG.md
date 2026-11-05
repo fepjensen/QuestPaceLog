@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.0, 2026-11-05
+
+- Renamed Adventurer's Almanac. Players see the new name in the AddOns list, window titles, the tracker, tooltips, the share card and the game's Options page, and chat lines carry an [Almanac] tag. /almanac works alongside /qpl.
+- The folder, the saved data file and `QuestPaceLogDB` keep their old names, so saved data from every earlier version keeps loading and the site export is unchanged.
+- The toc lists the license (MIT) and the project's home page.
+
 ## 3.0.0, 2026-11-01
 
 The launch build, for WoW Forever's release on November 4.

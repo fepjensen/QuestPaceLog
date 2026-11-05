@@ -1,5 +1,8 @@
-QuestPaceLog
-============
+Adventurer's Almanac
+====================
+
+Formerly QuestPaceLog. The folder keeps that name, so saved data from
+earlier versions keeps loading. Type /almanac or /qpl.
 
 What it does.
 Listens for the two events WoW Forever's own client already fires for your

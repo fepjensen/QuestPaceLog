@@ -1,4 +1,5 @@
--- QuestPaceLog
+-- Adventurer's Almanac (folder and saved data still named QuestPaceLog, so
+-- saved files from before the rename keep loading).
 -- Tracks the real-world moment each quest is accepted and turned in,
 -- keeps one log per play session, and prints a computed pacing report.
 -- Built for the "pace of questing" case study, but works on any character.
@@ -96,7 +97,7 @@ local function StartSession()
         entries = {},
     })
     table.insert(QuestPaceLogDB.sessions, session)
-    print("|cff33ff99[QuestPaceLog]|r New session started at " .. session.startedAtStr .. ". Use /qpl for the log, /qpl report for a summary.")
+    print("|cff33ff99[Almanac]|r New session started at " .. session.startedAtStr .. ". Use /qpl for the log, /qpl report for a summary.")
 end
 
 local function MostRecentSession()
@@ -109,7 +110,7 @@ local function ResumeOrStartSession()
     local recent = MostRecentSession()
     if recent and recent.startedAt and (time() - recent.startedAt) < RESUME_WINDOW_SEC then
         session = EnsureSessionShape(recent)
-        print("|cff33ff99[QuestPaceLog]|r Reload detected, continuing the session started at " .. (recent.startedAtStr or "?") .. ".")
+        print("|cff33ff99[Almanac]|r Reload detected, continuing the session started at " .. (recent.startedAtStr or "?") .. ".")
     else
         -- Either this is the very first reload ever for this character, or the
         -- saved file didn't come back from the reload. Either
@@ -154,14 +155,14 @@ local function MarkBacklog(query)
     local target = FindEntryToMark(query)
     if not target then
         if query and query ~= "" then
-            print("|cff33ff99[QuestPaceLog]|r No logged quest matches \"" .. query .. "\".")
+            print("|cff33ff99[Almanac]|r No logged quest matches \"" .. query .. "\".")
         else
-            print("|cff33ff99[QuestPaceLog]|r Nothing logged yet to mark.")
+            print("|cff33ff99[Almanac]|r Nothing logged yet to mark.")
         end
         return
     end
     target.backlog = true
-    print("|cff33ff99[QuestPaceLog]|r Marked \"" .. target.title .. "\" as backlog, its time won't count toward pace.")
+    print("|cff33ff99[Almanac]|r Marked \"" .. target.title .. "\" as backlog, its time won't count toward pace.")
 end
 
 local function FindBacklogEntry(query)
@@ -179,14 +180,14 @@ local function Unskip(query)
     local target = FindBacklogEntry(query)
     if not target then
         if query and query ~= "" then
-            print("|cff33ff99[QuestPaceLog]|r No backlog quest matches \"" .. query .. "\".")
+            print("|cff33ff99[Almanac]|r No backlog quest matches \"" .. query .. "\".")
         else
-            print("|cff33ff99[QuestPaceLog]|r Nothing is currently marked backlog.")
+            print("|cff33ff99[Almanac]|r Nothing is currently marked backlog.")
         end
         return
     end
     target.backlog = nil
-    print("|cff33ff99[QuestPaceLog]|r Unmarked \"" .. target.title .. "\", back to counting toward pace.")
+    print("|cff33ff99[Almanac]|r Unmarked \"" .. target.title .. "\", back to counting toward pace.")
 end
 
 -- Quest difficulty. The same colors the quest log uses, computed from the
@@ -325,7 +326,7 @@ local function ScanQuestDifficulty(playerLevel)
         end
         if color == "gray" and not rec.grayAt then
             rec.grayAt, rec.grayAtLevel = now, playerLevel
-            print(string.format("|cff33ff99[QuestPaceLog]|r \"%s\" is now gray for you (quest level %d, you're %d).", rec.title or "?", rec.questLevel or 0, playerLevel))
+            print(string.format("|cff33ff99[Almanac]|r \"%s\" is now gray for you (quest level %d, you're %d).", rec.title or "?", rec.questLevel or 0, playerLevel))
         end
     end
     -- At login an empty read is the log not loaded yet, not every quest abandoned at once.
@@ -363,18 +364,18 @@ local function TagReason(rest)
     local letter, query = (rest or ""):match("^(%a)%s*(.-)$")
     letter = letter and letter:lower()
     if not letter or not REASONS[letter] then
-        print("|cff33ff99[QuestPaceLog]|r Use /qpl why <letter> [part of the quest name]. Letters, a too hard, b scarce or contested, c out of route, d needs a group, e not worth it now, f just untracked, g don't remember.")
+        print("|cff33ff99[Almanac]|r Use /qpl why <letter> [part of the quest name]. Letters, a too hard, b scarce or contested, c out of route, d needs a group, e not worth it now, f just untracked, g don't remember.")
         return
     end
     local target = FindEntryAnySession(query)
     if not target then
-        print("|cff33ff99[QuestPaceLog]|r No quest found to tag" .. ((query and query ~= "") and (" matching \"" .. query .. "\".") or ", no untagged backlog quest left."))
+        print("|cff33ff99[Almanac]|r No quest found to tag" .. ((query and query ~= "") and (" matching \"" .. query .. "\".") or ", no untagged backlog quest left."))
         return
     end
     target.reason = letter
     local rec = target.questID and QuestTracker()[target.questID]
     if rec then rec.reason = letter end
-    print(string.format("|cff33ff99[QuestPaceLog]|r \"%s\" tagged, %s.", target.title or "?", REASONS[letter]))
+    print(string.format("|cff33ff99[Almanac]|r \"%s\" tagged, %s.", target.title or "?", REASONS[letter]))
 end
 
 local function FindOpenEntry(questID)
@@ -408,7 +409,7 @@ local function CloseDungeon(d)
     d.leftAtStr = date("%H:%M:%S", now)
     d.leftLevel = UnitLevel("player")
     d.durationSec = now - d.enteredAt
-    print(string.format("|cff33ff99[QuestPaceLog]|r Left %s after %d:%02d", d.name, math.floor(d.durationSec / 60), d.durationSec % 60))
+    print(string.format("|cff33ff99[Almanac]|r Left %s after %d:%02d", d.name, math.floor(d.durationSec / 60), d.durationSec % 60))
 end
 
 local function SyncDungeonState()
@@ -433,7 +434,7 @@ local function SyncDungeonState()
                 bosses = {},
             }
             table.insert(session.dungeons, d)
-            print(string.format("|cff33ff99[QuestPaceLog]|r Entered %s (%s) at level %d", name, difficultyName or instanceType, d.enteredLevel))
+            print(string.format("|cff33ff99[Almanac]|r Entered %s (%s) at level %d", name, difficultyName or instanceType, d.enteredLevel))
         end
     elseif openDungeon then
         CloseDungeon(openDungeon)
@@ -526,7 +527,7 @@ local function CloseRest(r)
     r.endedAt = now
     r.endedAtStr = date("%H:%M:%S", now)
     r.durationSec = now - r.startedAt
-    print(string.format("|cff33ff99[QuestPaceLog]|r Resting ends, %d:%02d.", math.floor(r.durationSec / 60), r.durationSec % 60))
+    print(string.format("|cff33ff99[Almanac]|r Resting ends, %d:%02d.", math.floor(r.durationSec / 60), r.durationSec % 60))
 end
 
 local function SyncRestState()
@@ -537,7 +538,7 @@ local function SyncRestState()
         local now = time()
         local zone, sub = CurrentZone()
         table.insert(session.rests, { startedAt = now, startedAtStr = date("%H:%M:%S", now), zone = zone, subZone = sub })
-        print("|cff33ff99[QuestPaceLog]|r Resting begins" .. (ZoneLabel(zone, sub) and (", " .. ZoneLabel(zone, sub)) or "") .. ".")
+        print("|cff33ff99[Almanac]|r Resting begins" .. (ZoneLabel(zone, sub) and (", " .. ZoneLabel(zone, sub)) or "") .. ".")
     elseif not resting and openRest then
         CloseRest(openRest)
     end
@@ -561,7 +562,7 @@ local function SyncCampBuffs(snapshotOnly)
                     r.campfire = true
                     r.campBuff = name
                 end
-                print("|cff33ff99[QuestPaceLog]|r Camp buff gained, " .. name .. (r and ", this rest counts as a campfire rest." or "."))
+                print("|cff33ff99[Almanac]|r Camp buff gained, " .. name .. (r and ", this rest counts as a campfire rest." or "."))
             end
         end
         for key in pairs(activeCampBuffs) do
@@ -607,10 +608,10 @@ local function SyncGroupState(atLoad)
         open = { joinedAt = now, joinedAtStr = date("%H:%M:%S", now), joinedLevel = UnitLevel("player"),
             zone = zone, subZone = sub, sizes = {}, maxSize = size, alreadyGrouped = atLoad or nil }
         table.insert(session.groups, open)
-        print(string.format("|cff33ff99[QuestPaceLog]|r %s a group of %d.", atLoad and "Already in" or "Joined", size))
+        print(string.format("|cff33ff99[Almanac]|r %s a group of %d.", atLoad and "Already in" or "Joined", size))
     elseif size <= 1 and open then
         open.leftAt, open.leftAtStr, open.durationSec = now, date("%H:%M:%S", now), now - open.joinedAt
-        print(string.format("|cff33ff99[QuestPaceLog]|r Left the group after %d:%02d.", math.floor(open.durationSec / 60), open.durationSec % 60))
+        print(string.format("|cff33ff99[Almanac]|r Left the group after %d:%02d.", math.floor(open.durationSec / 60), open.durationSec % 60))
         return
     end
     if open then
@@ -641,7 +642,7 @@ local function Settings()
 end
 
 local function Cheer(msg)
-    if Settings().cheer then print("|cffffd200[QuestPaceLog]|r " .. msg) end
+    if Settings().cheer then print("|cffffd200[Almanac]|r " .. msg) end
 end
 
 local function MinSec(sec)
@@ -739,7 +740,7 @@ local function OnDeath()
     local zone, sub = CurrentZone()
     local now = time()
     table.insert(session.deaths, { at = now, atStr = date("%H:%M:%S", now), level = UnitLevel("player"), zone = zone, subZone = sub })
-    print("|cff33ff99[QuestPaceLog]|r You died" .. (ZoneLabel(zone, sub) and (" in " .. ZoneLabel(zone, sub)) or "") .. ".")
+    print("|cff33ff99[Almanac]|r You died" .. (ZoneLabel(zone, sub) and (" in " .. ZoneLabel(zone, sub)) or "") .. ".")
 end
 
 local function OnAlive(event)
@@ -752,7 +753,7 @@ local function OnAlive(event)
     end
     d.revivedAt, d.downSec = now, now - d.at
     if d.releasedAt then d.ghostSec = now - d.releasedAt end
-    print(string.format("|cff33ff99[QuestPaceLog]|r Back on your feet after %s%s.", MinSec(d.downSec),
+    print(string.format("|cff33ff99[Almanac]|r Back on your feet after %s%s.", MinSec(d.downSec),
         d.ghostSec and string.format(", %s of it as a ghost", MinSec(d.ghostSec)) or ""))
 end
 
@@ -970,12 +971,12 @@ local function SetGoal(rest)
     lvl = lvl or rest:match("^(%d+)$")
     if rest == "clear" then
         QuestPaceLogDB.goal = nil
-        print("|cff33ff99[QuestPaceLog]|r Goal cleared.")
+        print("|cff33ff99[Almanac]|r Goal cleared.")
         return
     end
     if not lvl then
         local g = QuestPaceLogDB.goal
-        print("|cff33ff99[QuestPaceLog]|r " .. (g and string.format("Goal, level %d%s.", g.level, g.byStr and (" by " .. g.byStr) or "") or "No goal set.")
+        print("|cff33ff99[Almanac]|r " .. (g and string.format("Goal, level %d%s.", g.level, g.byStr and (" by " .. g.byStr) or "") or "No goal set.")
             .. " Use /qpl goal 20, /qpl goal 20 2026-10-12, or /qpl goal clear.")
         return
     end
@@ -985,7 +986,7 @@ local function SetGoal(rest)
         if ok then by = t end
     end
     QuestPaceLogDB.goal = { level = tonumber(lvl), by = by, byStr = by and string.format("%s-%s-%s", y, m, d) or nil, setAt = time(), setLevel = UnitLevel("player") }
-    print(string.format("|cff33ff99[QuestPaceLog]|r Goal set, level %s%s.", lvl, by and (" by " .. QuestPaceLogDB.goal.byStr) or ""))
+    print(string.format("|cff33ff99[Almanac]|r Goal set, level %s%s.", lvl, by and (" by " .. QuestPaceLogDB.goal.byStr) or ""))
 end
 
 -- What a level-up says when cheer is on. Your new level against the one
@@ -1016,7 +1017,7 @@ local function CardText(s, allTime)
     local deaths = #(s.deaths or {})
     local rate = XPPerMinute(s)
     local lines = {
-        string.format("QuestPaceLog, %s", allTime and ("all sessions since " .. (s.startedAtStr or "?"):sub(1, 10)) or ("session of " .. (s.startedAtStr or "?"):sub(1, 10))),
+        string.format("Adventurer's Almanac, %s", allTime and ("all sessions since " .. (s.startedAtStr or "?"):sub(1, 10)) or ("session of " .. (s.startedAtStr or "?"):sub(1, 10))),
         string.format("Level %d, %d quests turned in%s, played %s", UnitLevel("player"), turned,
             rate and string.format(", %d XP a minute", math.floor(rate + 0.5)) or "", MinSec(s.playedSec or PlayedSec(s) or 0)),
     }
@@ -1124,7 +1125,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         rec.zones = { entry.acceptedZone }
         SaveJournal(questID, title)
         local where = ZoneLabel(entry.acceptedZone, entry.acceptedSubZone)
-        print(string.format("|cff33ff99[QuestPaceLog]|r %s accepted \"%s\" at level %d%s%s", entry.acceptedElapsed, title, level,
+        print(string.format("|cff33ff99[Almanac]|r %s accepted \"%s\" at level %d%s%s", entry.acceptedElapsed, title, level,
             where and (" in " .. where) or "",
             entry.questLevel and string.format(", quest level %d (%s)", entry.questLevel, entry.colorAtAccept or "?") or ""))
 
@@ -1186,7 +1187,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             levelNote = string.format(" at level %d", level)
         end
         local turnWhere = ZoneLabel(entry.turnedInZone, entry.turnedInSubZone)
-        print(string.format("|cff33ff99[QuestPaceLog]|r %s turned in \"%s\"%s%s%s%s%s", entry.turnedInElapsed, entry.title, suffix, xpNote, levelNote,
+        print(string.format("|cff33ff99[Almanac]|r %s turned in \"%s\"%s%s%s%s%s", entry.turnedInElapsed, entry.title, suffix, xpNote, levelNote,
             turnWhere and (" in " .. turnWhere) or "",
             entry.turnedInGroupSize > 1 and string.format(", in a group of %d", entry.turnedInGroupSize) or ""))
         if window and window:IsShown() then pcall(window.Show_, window.allTime, window.lens) end
@@ -1204,10 +1205,10 @@ frame:SetScript("OnEvent", function(self, event, ...)
         if not entry then return end
         if added == false and not entry.backlog then
             entry.backlog = true
-            print("|cff33ff99[QuestPaceLog]|r \"" .. entry.title .. "\" untracked, marked backlog. Say why with /qpl why a-g.")
+            print("|cff33ff99[Almanac]|r \"" .. entry.title .. "\" untracked, marked backlog. Say why with /qpl why a-g.")
         elseif added == true and entry.backlog then
             entry.backlog = nil
-            print("|cff33ff99[QuestPaceLog]|r \"" .. entry.title .. "\" tracked again, back to counting toward pace.")
+            print("|cff33ff99[Almanac]|r \"" .. entry.title .. "\" tracked again, back to counting toward pace.")
         end
 
     elseif event == "PLAYER_XP_UPDATE" then
@@ -1238,7 +1239,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 success = (success == 1),
                 at = time(),
             })
-            print(string.format("|cff33ff99[QuestPaceLog]|r %s, %s", encounterName, (success == 1) and "down" or "wipe"))
+            print(string.format("|cff33ff99[Almanac]|r %s, %s", encounterName, (success == 1) and "down" or "wipe"))
         end
 
     elseif event == "PLAYER_UPDATE_RESTING" then
@@ -1291,10 +1292,10 @@ end)
 
 local function PrintLog()
     if not session or #session.entries == 0 then
-        print("|cff33ff99[QuestPaceLog]|r No quests logged in the current session yet.")
+        print("|cff33ff99[Almanac]|r No quests logged in the current session yet.")
         return
     end
-    print(string.format("|cff33ff99[QuestPaceLog]|r Session started %s, %d entries.", session.startedAtStr, #session.entries))
+    print(string.format("|cff33ff99[Almanac]|r Session started %s, %d entries.", session.startedAtStr, #session.entries))
     for i, e in ipairs(session.entries) do
         local levelStr
         if e.acceptedLevel and e.turnedInLevel and e.acceptedLevel ~= e.turnedInLevel then
@@ -1427,7 +1428,7 @@ local function ReportLines(s, allTime)
     local live = not allTime
     if not s or (#s.entries == 0 and #s.dungeons == 0 and #s.rests == 0 and #s.groups == 0 and (s.xpTotal or 0) == 0
         and #(s.deaths or {}) == 0 and #(s.discoveries or {}) == 0 and #(s.flightPaths or {}) == 0 and (s.kills or 0) == 0) then
-        add("|cff33ff99[QuestPaceLog]|r Nothing to report yet.")
+        add("|cff33ff99[Almanac]|r Nothing to report yet.")
         return out
     end
 
@@ -1441,9 +1442,9 @@ local function ReportLines(s, allTime)
     end
 
     if allTime then
-        add(string.format("|cff33ff99[QuestPaceLog] Report|r, all %d sessions since %s", s.sessionCount, s.startedAtStr))
+        add(string.format("|cff33ff99[Almanac] Report|r, all %d sessions since %s", s.sessionCount, s.startedAtStr))
     else
-        add(string.format("|cff33ff99[QuestPaceLog] Report|r, session started %s", s.startedAtStr))
+        add(string.format("|cff33ff99[Almanac] Report|r, session started %s", s.startedAtStr))
     end
     add(string.format("Quests logged, %d. Quests with both a start and end time, %d%s.", #s.entries, #closed,
         backlogCount > 0 and string.format(" (%d more marked backlog, not counted here)", backlogCount) or ""))
@@ -1621,7 +1622,7 @@ local function ReportLines(s, allTime)
             tracked, wentGray, grayThenDone, dropped))
     end
 
-    add("|cff33ff99[QuestPaceLog]|r Raw data is also saved in your SavedVariables file. Paste this report, or that file's contents, back into the project and it becomes a written case study.")
+    add("|cff33ff99[Almanac]|r Your full record is saved with your character's settings every time you log out.")
     return out
 end
 
@@ -2230,10 +2231,10 @@ function UI.SetArchetype(key)
     s.archetype, s.welcomed, s.lens, s.keptType = key, true, nil, nil
     if UI.welcome then UI.welcome:Hide() end
     if key == "auto" then
-        print("|cff33ff99[QuestPaceLog]|r Your type will follow the way you play, from the Compass, once you've played 10 minutes. /qpl type changes it.")
+        print("|cff33ff99[Almanac]|r Your type will follow the way you play, from the Compass, once you've played 10 minutes. /qpl type changes it.")
     else
         local name = UI.TYPES[key].name
-        print(string.format("|cff33ff99[QuestPaceLog]|r You chose %s. Your dashboard and tracker now lead with what %ss care about. /qpl type changes it.", name, name))
+        print(string.format("|cff33ff99[Almanac]|r You chose %s. Your dashboard and tracker now lead with what %ss care about. /qpl type changes it.", name, name))
     end
     if window then
         window.lens = nil
@@ -2243,7 +2244,7 @@ function UI.SetArchetype(key)
 end
 
 local function BuildWindow()
-    local f = UI.Window("QuestPaceLogFrame", "Quest Pace Log", WIN_W, WIN_H, UI.ICONS.overview)
+    local f = UI.Window("QuestPaceLogFrame", "Adventurer's Almanac", WIN_W, WIN_H, UI.ICONS.overview)
     f:SetResizable(true)
     if not (f.SetResizeBounds and pcall(f.SetResizeBounds, f, WIN_W, 600, WIN_W, 2000)) then
         if f.SetMinResize then pcall(f.SetMinResize, f, WIN_W, 600) end
@@ -2652,7 +2653,7 @@ local function BuildWindow()
             local ok, err = pcall(lens == "overview" and f.UpdateVisuals or function(x) f.UpdateLens(lens, s, x, allTime) end, st)
             if not ok and not f.warned then
                 f.warned = true
-                print("|cff33ff99[QuestPaceLog]|r The tiles and charts couldn't draw, " .. tostring(err) .. ". The report below them still works.")
+                print("|cff33ff99[Almanac]|r The tiles and charts couldn't draw, " .. tostring(err) .. ". The report below them still works.")
             end
         end
         local plain = table.concat(ReportLines(s, allTime), "\n"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
@@ -2666,7 +2667,7 @@ local function ShowWindow(allTime, lens)
     if not window then
         local ok, f = pcall(BuildWindow)
         if not ok then
-            print("|cff33ff99[QuestPaceLog]|r The window couldn't open on this client, " .. tostring(f) .. ". /qpl report still works.")
+            print("|cff33ff99[Almanac]|r The window couldn't open on this client, " .. tostring(f) .. ". /qpl report still works.")
             return
         end
         window = f
@@ -2683,7 +2684,7 @@ end
 -- the one that sounds like them. Opens by itself the first time, and with
 -- /qpl type after that.
 function UI.BuildWelcome()
-    local f = UI.Window("QuestPaceLogWelcome", "Welcome to Quest Pace Log", 720, 540, UI.ICONS.overview)
+    local f = UI.Window("QuestPaceLogWelcome", "Welcome to Adventurer's Almanac", 720, 540, UI.ICONS.overview)
     local c = f.content
     UI.Text(c, "GameFontNormalLarge", 72, -34):SetText("What kind of player are you?")
     UI.Text(c, UI.Fonts().bodyMed, 24, -72, "TOPLEFT", 672):SetText("Players enjoy games for different reasons. The game designer Richard Bartle sorted them into four kinds. "
@@ -2731,7 +2732,7 @@ function UI.BuildWelcome()
     later:SetScript("OnClick", function()
         Settings().welcomed = true
         f:Hide()
-        print("|cff33ff99[QuestPaceLog]|r /qpl type opens the welcome window again whenever you like.")
+        print("|cff33ff99[Almanac]|r /qpl type opens the welcome window again whenever you like.")
     end)
     function f.Refresh()
         for i, t in ipairs(UI.TYPES) do if t.key == Settings().archetype then select(i) end end
@@ -2743,7 +2744,7 @@ ShowWelcome = function()
     if not UI.welcome then
         local ok, f = pcall(UI.BuildWelcome)
         if not ok then
-            print("|cff33ff99[QuestPaceLog]|r The welcome window couldn't open on this client, " .. tostring(f) .. ". /qpl type achiever, explorer, socializer or competitor picks a type.")
+            print("|cff33ff99[Almanac]|r The welcome window couldn't open on this client, " .. tostring(f) .. ". /qpl type achiever, explorer, socializer or competitor picks a type.")
             return
         end
         UI.welcome = f
@@ -2856,7 +2857,7 @@ local hudOk, hudErr = pcall(function()
     hud.bg:SetAllPoints()
     hud.bg:SetColorTexture(0, 0, 0, 0.4)
     hud.bg:Hide()
-    UI.Text(hud, "GameFontNormal", 6, -4):SetText("Quest Pace Log")
+    UI.Text(hud, "GameFontNormal", 6, -4):SetText("Adventurer's Almanac")
     local line = hud:CreateTexture(nil, "ARTWORK")
     line:SetPoint("TOPLEFT", 4, -20)
     line:SetSize(UI.HUD_W - 8, 1)
@@ -2897,7 +2898,7 @@ local hudOk, hudErr = pcall(function()
         self.bg:Show()
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("Quest Pace Log")
+        GameTooltip:SetText("Adventurer's Almanac")
         GameTooltip:AddLine("Click for the dashboard, right-click for settings, drag to move.", 1, 1, 1, true)
         GameTooltip:Show()
     end)
@@ -2971,12 +2972,12 @@ local hudOk, hudErr = pcall(function()
         local ok, err = pcall(hud.Refresh)
         if not ok and not hud.warned then
             hud.warned = true
-            print("|cff33ff99[QuestPaceLog]|r The on-screen tracker couldn't update, " .. tostring(err) .. ". /qpl hud off hides it.")
+            print("|cff33ff99[Almanac]|r The on-screen tracker couldn't update, " .. tostring(err) .. ". /qpl hud off hides it.")
         end
     end)
 end)
 if not hudOk then
-    print("|cff33ff99[QuestPaceLog]|r The on-screen tracker couldn't be made on this client, " .. tostring(hudErr) .. ".")
+    print("|cff33ff99[Almanac]|r The on-screen tracker couldn't be made on this client, " .. tostring(hudErr) .. ".")
 end
 
 local function SetHUD(on, quiet)
@@ -2984,14 +2985,14 @@ local function SetHUD(on, quiet)
     if hud then
         if on then hud:Show(); pcall(hud.Refresh) else hud:Hide() end
     end
-    if not quiet then print("|cff33ff99[QuestPaceLog]|r On-screen tracker " .. (on and "on" or "off") .. ". /qpl hud on or /qpl hud off.") end
+    if not quiet then print("|cff33ff99[Almanac]|r On-screen tracker " .. (on and "on" or "off") .. ". /qpl hud on or /qpl hud off.") end
 end
 
 -- The settings window. Your type, what the tracker shows, where quest
 -- timers appear, and the cheer messages. Right-click the tracker or
 -- /qpl options to open it.
 function UI.BuildOptions()
-    local w = UI.Window("QuestPaceLogOptions", "Quest Pace Log Settings", 560, 560, UI.ICONS.overview)
+    local w = UI.Window("QuestPaceLogOptions", "Adventurer's Almanac Settings", 560, 560, UI.ICONS.overview)
     local f = w.content
     local checks = {}
     local typeText = UI.Text(f, "GameFontNormal", 72, -34)
@@ -3054,7 +3055,7 @@ ShowOptions = function()
     if not UI.options then
         local ok, f = pcall(UI.BuildOptions)
         if not ok then
-            print("|cff33ff99[QuestPaceLog]|r The settings window couldn't open on this client, " .. tostring(f) .. ".")
+            print("|cff33ff99[Almanac]|r The settings window couldn't open on this client, " .. tostring(f) .. ".")
             return
         end
         UI.options = f
@@ -3266,7 +3267,7 @@ local tickOk, tickErr = pcall(function()
             local ok, sug = pcall(UI.Suggestion)
             if ok and sug and time() - (Settings().suggestedAt or 0) > 86400 then
                 Settings().suggestedAt = time()
-                print(string.format("|cff33ff99[QuestPaceLog]|r Across all your sessions your play leans %s more than %s, the type you chose. Open the Compass tab in the dashboard to see why.",
+                print(string.format("|cff33ff99[Almanac]|r Across all your sessions your play leans %s more than %s, the type you chose. Open the Compass tab in the dashboard to see why.",
                     UI.TYPES[sug.leans].name, UI.TYPES[sug.chosen].name))
             end
         end
@@ -3277,12 +3278,12 @@ local tickOk, tickErr = pcall(function()
         if not ok then UI.timersError = tostring(err) end
         if not ok and not UI.timersWarned then
             UI.timersWarned = true
-            print("|cff33ff99[QuestPaceLog]|r Quest timers in the game's quest log couldn't update, " .. tostring(err) .. ". The settings window can turn them off.")
+            print("|cff33ff99[Almanac]|r Quest timers in the game's quest log couldn't update, " .. tostring(err) .. ". The settings window can turn them off.")
         end
     end)
 end)
 if not tickOk then
-    print("|cff33ff99[QuestPaceLog]|r Quest timers in the game's quest log couldn't start on this client, " .. tostring(tickErr) .. ".")
+    print("|cff33ff99[Almanac]|r Quest timers in the game's quest log couldn't start on this client, " .. tostring(tickErr) .. ".")
 end
 
 -- What /qpl diag reports, which of the game's quest frames this client has,
@@ -3296,28 +3297,28 @@ function UI.Diag()
     end
     local hooks = {}
     for i, h in ipairs(UI.QUEST_UI_HOOKS) do if UI.hooked[i] then table.insert(hooks, (h[1] and (h[1] .. ".") or "") .. h[2]) end end
-    print("|cff33ff99[QuestPaceLog]|r Quest frames found, " .. (#have > 0 and table.concat(have, ", ") or "none") .. ".")
-    print("|cff33ff99[QuestPaceLog]|r Hooks attached, " .. (#hooks > 0 and table.concat(hooks, ", ") or "none") .. ". Titles with a timer now, " .. #UI.found .. ".")
+    print("|cff33ff99[Almanac]|r Quest frames found, " .. (#have > 0 and table.concat(have, ", ") or "none") .. ".")
+    print("|cff33ff99[Almanac]|r Hooks attached, " .. (#hooks > 0 and table.concat(hooks, ", ") or "none") .. ". Titles with a timer now, " .. #UI.found .. ".")
     local byID, byTitle = UI.OpenQuestTimes()
     local titles = {}
     for _, rec in pairs(byID) do table.insert(titles, rec.title or "?") end
     table.sort(titles)
-    print("|cff33ff99[QuestPaceLog]|r Tracked open quests that get a timer, " .. #titles .. (#titles > 0 and (", " .. table.concat(titles, ", ")) or "") .. ".")
+    print("|cff33ff99[Almanac]|r Tracked open quests that get a timer, " .. #titles .. (#titles > 0 and (", " .. table.concat(titles, ", ")) or "") .. ".")
     for _, list in ipairs({ UI.TRACKER_ROOTS, UI.LOG_ROOTS }) do
         for _, name in ipairs(list) do
             local root = _G[name]
             if type(root) == "table" and root.IsVisible and root:IsVisible() then
                 local stats = { frames = 0, strings = 0, matched = {}, other = {} }
                 local ok, err = pcall(UI.ScanQuestUI, root, byID, byTitle, {}, 0, stats)
-                print(string.format("|cff33ff99[QuestPaceLog]|r %s, %d frames, %d lines of text. With a timer, %s. Other lines, %s%s", name, stats.frames, stats.strings,
+                print(string.format("|cff33ff99[Almanac]|r %s, %d frames, %d lines of text. With a timer, %s. Other lines, %s%s", name, stats.frames, stats.strings,
                     #stats.matched > 0 and table.concat(stats.matched, ", ") or "none",
                     #stats.other > 0 and table.concat(stats.other, ", ") or "none",
                     ok and "." or (". Error, " .. tostring(err))))
             end
         end
     end
-    if UI.timersError then print("|cff33ff99[QuestPaceLog]|r Last timer error, " .. UI.timersError .. ".") end
-    if UI.parchmentSource then print("|cff33ff99[QuestPaceLog]|r Parchment, " .. UI.parchmentSource .. ".") end
+    if UI.timersError then print("|cff33ff99[Almanac]|r Last timer error, " .. UI.timersError .. ".") end
+    if UI.parchmentSource then print("|cff33ff99[Almanac]|r Parchment, " .. UI.parchmentSource .. ".") end
 end
 
 -- A round button on the minimap's edge, like the game's own. Click for the
@@ -3354,21 +3355,21 @@ local buttonOk, buttonErr = pcall(function()
     end)
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("Quest Pace Log")
+        GameTooltip:SetText("Adventurer's Almanac")
         GameTooltip:AddLine("Click for the dashboard, right-click for settings. Drag to move.", 1, 1, 1, true)
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function() GameTooltip:Hide() end)
 end)
 if not buttonOk then
-    print("|cff33ff99[QuestPaceLog]|r The dashboard button couldn't be made on this client, " .. tostring(buttonErr) .. ". /qpl show still works.")
+    print("|cff33ff99[Almanac]|r The dashboard button couldn't be made on this client, " .. tostring(buttonErr) .. ". /qpl show still works.")
 end
 
 -- A page in the game's own Options, under AddOns, that opens the settings window.
 pcall(function()
     local panel = CreateFrame("Frame")
-    panel.name = "Quest Pace Log"
-    local open = UI.Button(panel, nil, "Open Quest Pace Log settings", 240)
+    panel.name = "Adventurer's Almanac"
+    local open = UI.Button(panel, nil, "Open Adventurer's Almanac settings", 240)
     open:SetPoint("TOPLEFT", 16, -16)
     open:SetScript("OnClick", function() ShowOptions() end)
     local blizz = _G.Settings -- the game's settings API, not this addon's Settings()
@@ -3380,6 +3381,7 @@ pcall(function()
 end)
 
 SLASH_QUESTPACELOG1 = "/qpl"
+SLASH_QUESTPACELOG2 = "/almanac"
 SlashCmdList["QUESTPACELOG"] = function(msg)
     msg = (msg or ""):lower():match("^%s*(.-)%s*$")
     local command, rest = msg:match("^(%S*)%s*(.-)$")
@@ -3403,12 +3405,12 @@ SlashCmdList["QUESTPACELOG"] = function(msg)
         TagReason(rest)
     elseif command == "cheer" then
         if rest == "on" or rest == "off" then Settings().cheer = (rest == "on") end
-        print("|cff33ff99[QuestPaceLog]|r Records, level and goal messages are " .. (Settings().cheer and "on" or "off") .. ". /qpl cheer on or /qpl cheer off.")
+        print("|cff33ff99[Almanac]|r Records, level and goal messages are " .. (Settings().cheer and "on" or "off") .. ". /qpl cheer on or /qpl cheer off.")
     elseif command == "goal" then
         SetGoal(rest)
     elseif command == "eta" then
         local eta = LevelETA()
-        print("|cff33ff99[QuestPaceLog]|r " .. (eta and string.format("At this session's pace, level %d in about %s of play.", UnitLevel("player") + 1, MinSec(eta))
+        print("|cff33ff99[Almanac]|r " .. (eta and string.format("At this session's pace, level %d in about %s of play.", UnitLevel("player") + 1, MinSec(eta))
             or "Not enough XP this session yet to estimate the next level."))
     elseif command == "records" then
         local any = false
@@ -3416,16 +3418,16 @@ SlashCmdList["QUESTPACELOG"] = function(msg)
             local r = Records()[key]
             if r then any = true print(string.format("%s, %s, %s.", name, r.label or tostring(r.value), date("%Y-%m-%d", r.at))) end
         end
-        if not any then print("|cff33ff99[QuestPaceLog]|r No records yet.") end
+        if not any then print("|cff33ff99[Almanac]|r No records yet.") end
     elseif command == "journal" then
         local best
         for id, j in pairs(QuestPaceLogDB.journal or {}) do
             if (rest == "" or (j.title or ""):lower():find(rest, 1, true)) and (not best or j.savedAt > best.savedAt) then best = j end
         end
         if best then
-            print("|cff33ff99[QuestPaceLog]|r " .. best.title .. ". " .. (best.text or "") .. (best.objective and (" Objective, " .. best.objective) or ""))
+            print("|cff33ff99[Almanac]|r " .. best.title .. ". " .. (best.text or "") .. (best.objective and (" Objective, " .. best.objective) or ""))
         else
-            print("|cff33ff99[QuestPaceLog]|r No saved quest text" .. (rest ~= "" and (" matching \"" .. rest .. "\"") or "") .. ".")
+            print("|cff33ff99[Almanac]|r No saved quest text" .. (rest ~= "" and (" matching \"" .. rest .. "\"") or "") .. ".")
         end
     elseif command == "hud" then
         SetHUD(rest ~= "off")
@@ -3435,7 +3437,7 @@ SlashCmdList["QUESTPACELOG"] = function(msg)
         elseif UI.TYPES[rest] or rest == "auto" then
             UI.SetArchetype(rest)
         else
-            print("|cff33ff99[QuestPaceLog]|r /qpl type opens the welcome window, or /qpl type achiever, explorer, socializer, competitor or auto.")
+            print("|cff33ff99[Almanac]|r /qpl type opens the welcome window, or /qpl type achiever, explorer, socializer, competitor or auto.")
         end
     elseif command == "options" or command == "settings" then
         ShowOptions()
@@ -3445,23 +3447,23 @@ SlashCmdList["QUESTPACELOG"] = function(msg)
         ShowCard(rest == "all")
     elseif command == "buffs" then
         local names = PlayerBuffNames()
-        print("|cff33ff99[QuestPaceLog]|r Your buffs right now, " .. (#names > 0 and table.concat(names, ", ") or "none") .. ".")
+        print("|cff33ff99[Almanac]|r Your buffs right now, " .. (#names > 0 and table.concat(names, ", ") or "none") .. ".")
     elseif command == "campbuff" then
         local action, name = rest:match("^(%S*)%s*(.-)$")
         local list = CampBuffNames()
         if action == "add" and name ~= "" then
-            for _, n in ipairs(list) do if n == name then print("|cff33ff99[QuestPaceLog]|r Already watching " .. name .. ".") return end end
+            for _, n in ipairs(list) do if n == name then print("|cff33ff99[Almanac]|r Already watching " .. name .. ".") return end end
             table.insert(list, name)
-            print("|cff33ff99[QuestPaceLog]|r Now watching " .. name .. " as a camp buff.")
+            print("|cff33ff99[Almanac]|r Now watching " .. name .. " as a camp buff.")
         elseif action == "remove" and name ~= "" then
             for i, n in ipairs(list) do
-                if n == name then table.remove(list, i) print("|cff33ff99[QuestPaceLog]|r Stopped watching " .. name .. ".") return end
+                if n == name then table.remove(list, i) print("|cff33ff99[Almanac]|r Stopped watching " .. name .. ".") return end
             end
-            print("|cff33ff99[QuestPaceLog]|r Not watching " .. name .. ".")
+            print("|cff33ff99[Almanac]|r Not watching " .. name .. ".")
         else
-            print("|cff33ff99[QuestPaceLog]|r Watching as camp buffs, " .. table.concat(list, ", ") .. ". Use /qpl campbuff add <name> or /qpl campbuff remove <name>, and /qpl buffs to see your current buffs.")
+            print("|cff33ff99[Almanac]|r Watching as camp buffs, " .. table.concat(list, ", ") .. ". Use /qpl campbuff add <name> or /qpl campbuff remove <name>, and /qpl buffs to see your current buffs.")
         end
     else
-        print("|cff33ff99[QuestPaceLog]|r Commands, /qpl start for a new session, /qpl for the log, /qpl report for a summary, /qpl report all for every session, /qpl show for a window, /qpl skip [name] to mark backlog, /qpl unskip [name] to undo, /qpl why <a-g> [name] to say why a quest was parked, /qpl buffs and /qpl campbuff for camp tracking, /qpl goal, /qpl eta, /qpl records, /qpl journal [name], /qpl card, /qpl cheer on or off, /qpl hud on or off, /qpl type, /qpl options, /qpl diag.")
+        print("|cff33ff99[Almanac]|r Commands, /qpl start for a new session, /qpl for the log, /qpl report for a summary, /qpl report all for every session, /qpl show for a window, /qpl skip [name] to mark backlog, /qpl unskip [name] to undo, /qpl why <a-g> [name] to say why a quest was parked, /qpl buffs and /qpl campbuff for camp tracking, /qpl goal, /qpl eta, /qpl records, /qpl journal [name], /qpl card, /qpl cheer on or off, /qpl hud on or off, /qpl type, /qpl options, /qpl diag.")
     end
 end
