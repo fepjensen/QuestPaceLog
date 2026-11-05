@@ -13,7 +13,7 @@ Felips is a lawyer building a career in game design criticism, not a programmer.
 - **Tests for every change.** `luajit tests/run_tests.lua` from the repo root (LuaJIT runs Lua 5.1 code, installed with winget). Add a test for each new behavior. The tests stub the WoW API, so they prove the logic, not the client. Say so when reporting.
 - **Unknown API, check in game.** The Forever client reports interface version 16001 and its exact API isn't documented. It runs the modern (retail engine) interface, with ObjectiveTrackerFrame, Edit Mode and the quest log on the world map, seen in `Logs\EditMode.log` and a screenshot on 2026-10-05. Write new code defensively (check a function exists, use pcall where a call might fail) and tell Felips which chat line or `/dump` command confirms it works.
 - **Version and changelog.** Bump `## Version` in `QuestPaceLog/QuestPaceLog.toc` for each release and add a CHANGELOG entry.
-- **Don't touch the WTF folder.** Never edit or delete anything under `F:\World of Warcraft\_forever_\WTF`, the launch client's. The game writes the saved files, and Felips keeps dated backups there. The beta client's WTF folder, with all raw beta data, was removed with the beta by 2026-11-01. The only surviving beta record is the summary in the portfolio repo, `src/data/lab/questpacelog.json`, exported 2026-10-03.
+- **Don't touch the WTF folder.** Never edit or delete anything under `F:\World of Warcraft\_forever_\WTF`, the launch client's. The game writes the saved files, and Felips keeps dated backups there. The beta client's WTF folder, with all raw beta data, was removed with the beta by 2026-11-01. The only surviving beta record is the summary in the portfolio repo, `src/data/lab/questpacelog-beta.json`, exported 2026-10-08 and covering play up to 2026-10-07. It's the Lab page's Beta tab, and must never be overwritten.
 - **Ask before** installing software, creating links or files outside this repo, or pushing anywhere.
 - **Writing style for anything Felips will read** (chat lines, README, commit messages, your replies). No em dashes and no colons in prose. Use periods and commas instead. Existing chat lines follow this already, for example "Resting ends, 1:05."
 
@@ -25,7 +25,7 @@ Felips is a lawyer building a career in game design criticism, not a programmer.
 - `CHANGELOG.md`
 - `tools/export_site.py` builds the site Lab page data file (schemaVersion 3) from every saved file and dated backup, read only. `python tools/test_export_site.py` checks it
 - `docs/LAUNCH.md` the plan for launch day (November 4) and for publishing the addon
-- `update-site.ps1` runs the export into `F:\Claude Code\portfolio`, checks the site builds, and commits and pushes (deploys) only after Felips types y
+- `update-site.ps1` runs the export into `F:\Claude Code\portfolio`, checks the site builds, and commits and pushes (deploys) after Felips types y. With `-Auto` it publishes on its own, only when there's new play, the site builds and the portfolio has no unpushed commits of Felips'. The Windows scheduled task "Adventurer's Almanac site update" runs it with `-Auto` daily at 6:00, or at the next logon if the PC was off, logging to `logs/site-update.log` (git-ignored). Felips asked for this on 2026-11-05. To stop it, `Unregister-ScheduledTask -TaskName "Adventurer's Almanac site update"`
 
 ## Deploying
 

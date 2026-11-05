@@ -6,7 +6,7 @@ WoW Forever launches November 4, 2026. Part A is the addon working in the launch
 
 - The launch client is installed at `F:\World of Warcraft\_forever_`, version 1.60.1.70707. That's interface 16001, the same number the beta reported, so the toc needs no change.
 - QuestPaceLog 3.0.0 is linked into `_forever_\Interface\AddOns` with `deploy.ps1`, so the game loads it straight from the repo.
-- The beta client's `WTF` folder is gone, and with it all raw beta play data and its dated backups. No copy exists on drives C, E or F, or in the Recycle Bin. The only surviving record is the summary the site export made on October 3, in the portfolio repo (`src/data/lab/questpacelog.json`) and live on the Lab page. It covers 20 sessions for Zeembie and 1 for Ziza. Play from October 3 to the end of the beta is lost unless a copy exists somewhere else.
+- The beta client's `WTF` folder is gone, and with it all raw beta play data and its dated backups. No copy exists on drives C, E or F, or in the Recycle Bin. The only surviving record is the summary the site export made on October 8, now `src/data/lab/questpacelog-beta.json` in the portfolio repo and the Lab page's Beta tab. It covers 27 sessions for Zeembie up to October 7, and 1 for Ziza. Play from October 8 to the end of the beta is lost unless a copy exists somewhere else.
 - `update-site.ps1` refuses to replace that beta summary, so the first launch update can't erase it by accident.
 
 ## Part A. The addon at launch
@@ -38,9 +38,9 @@ Run it on November 4, on the character you'll play. Each line names what confirm
 
 ### Still open
 
-- **Decision** how the Lab page shows beta and launch data. My recommendation is a phase switch on the page, launch data first and the October 3 beta summary as its own tab. It needs the beta JSON kept as its own file in the portfolio repo and a small page change. Until then, `update-site.ps1` stops before replacing the beta data.
+- **Decision** how the Lab page shows beta and launch data. My recommendation is a phase switch on the page, launch data first and the October 8 beta summary as its own tab. It needs the beta JSON kept as its own file in the portfolio repo and a small page change. Until then, `update-site.ps1` stops before replacing the beta data.
 - **Decision** whether to remove the old link in `_classic_beta_\Interface\AddOns`. It still points at the repo. If the beta folder is ever deleted, a careless delete could follow the link into the repo. The repo is safe on GitHub either way, but removing only the link is the tidy fix.
-- **Question for Felips** whether a copy of the beta `WTF` folder exists anywhere else, a cloud drive, another computer or an external disk. If it does, the October 3 to 21 data can still be recovered.
+- **Question for Felips** whether a copy of the beta `WTF` folder exists anywhere else, a cloud drive, another computer or an external disk. If it does, the October 8 to 21 data can still be recovered.
 
 ## Part B. Publishing
 
