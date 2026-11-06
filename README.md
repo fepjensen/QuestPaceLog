@@ -1,3 +1,5 @@
+<img src="media/logo.png" alt="" width="128" align="right">
+
 # Adventurer's Almanac
 
 **Quest timers, leveling stats and your player type, for WoW Forever.**

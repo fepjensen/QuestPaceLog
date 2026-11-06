@@ -19,10 +19,21 @@ Ready-to-paste text and settings for the CurseForge and Wago projects. Felips cr
 | Release type | Beta for the first week, then Release |
 | Changelog | That version's section of CHANGELOG.md, which the GitHub release already shows |
 
-## Images to prepare
+## Images
 
-- **Logo**, square, at least 400 by 400. An original drawing, not Blizzard art, since the sites show it outside the game. To be made.
-- **Screenshots**, taken after the design overhaul, in game, with chat hidden or cropped out so no other player's name or message appears. The welcome window, the dashboard Overview, the Compass, the on-screen tracker, a quest timer in the objective tracker, and the settings window.
+- **Logo**, `media/logo.png`, 512 by 512, drawn for the addon (no Blizzard art). `media/logo.svg` is its source, render it again with any browser after an edit.
+- **Screenshots**, `media/store/`, cropped from launch play on 2026-11-05 to the addon's own windows. Upload them in this order, with these captions.
+
+| File | Caption |
+|---|---|
+| 01-dashboard.jpg | The dashboard. Where your experience comes from, how hard your quests were, your last quests and the time each level took. |
+| 02-compass.jpg | The Compass places your real play on Bartle's graph of player types. |
+| 03-explorer.jpg | A tab for each type. The Explorer's discoveries and the quests that sent you farthest. |
+| 04-quest-timers-map.jpg | Quest timers in the map's quest log, counting only time played with the quest tracked. |
+| 05-quest-timers-tracker.jpg | The on-screen tracker, and the timers in the game's objective tracker. |
+| 06-export.jpg | The full report, selected to copy. |
+
+The Explorer and Export shots predate two small wording changes in 4.0's final build, a shorter tile label and "Timed quests" in the report. Retake them in a later version if they should match exactly. Still missing, the welcome window and the settings window.
 
 ## Steps
 
