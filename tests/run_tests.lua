@@ -1228,6 +1228,46 @@ test("quests from before 2.4 start from the time you played since accepting them
 end)
 
 
+test("a quest already in the log when the addon first saw it gets a timer too, marked ~", function()
+    local W = newWorld()
+    W.addQuest(97900, "Camping 101: Blacksmithing", 6)
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    eq(QuestPaceLogDB.quests[97900].predatesTracking, true, "no accept was seen")
+    W.clock = W.clock + 75
+    hudTick()
+    assert(W.texts["~1:15"], "timed from when it was first seen")
+    assert(not W.texts["No tracked quests open"], "and the tracker lists it")
+end)
+
+test("a quest accepted in an earlier session counts in this session's recent quests and average", function()
+    local W = newWorld()
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.addQuest(740, "Carried Over", 8)
+    W.fire("QUEST_ACCEPTED", 740)
+    W.clock = W.clock + 200
+    W.fire("PLAYER_LOGOUT")
+    W.clock = W.clock + 3600
+    W.fire("PLAYER_ENTERING_WORLD", true, false)
+    W.clock = W.clock + 100
+    W.removeQuest(740)
+    W.fire("QUEST_TURNED_IN", 740, 600, 0)
+    local e = QuestPaceLogDB.sessions[2].entries[1]
+    eq(e.durationSec, nil, "no accept in this session")
+    eq(e.activeSec, 300, "its clock, 200 then 100 seconds played")
+    W.cmd("show overview")
+    local row, emptyShown, avg = false, false, nil
+    for _, o in ipairs(W.objects) do
+        if o.shownText == "Carried Over" and o.shown ~= false then row = true end
+        if o.shownText == "Finish a quest and it shows up here, with its time and XP a minute." and o.shown ~= false then emptyShown = true end
+        if o.shownText == "Average per quest" then avg = o end
+    end
+    assert(row and W.texts["5:00"], "listed in recent quests with its clock time")
+    assert(not emptyShown, "no empty message over it")
+    W.cmd("report")
+    assert(W.saw("Timed quests, 1."), "the report counts it")
+    assert(W.saw("Average time per quest, 5:00."), "and averages it")
+end)
+
 test("tracker titles wrapped in the game's color codes still get their timer", function()
     local W = newWorld()
     W.fire("PLAYER_ENTERING_WORLD", true, false)
@@ -1355,10 +1395,11 @@ local function layoutProblems(W, root)
                     table.insert(problems, label(o) .. " is cut off, it needs " .. math.floor(natural) .. " of " .. o.w .. " pixels")
                 end
                 local p = o._parent
-                if p and p ~= root and (p.w or 0) > 0 and (p.h or 0) > 0 then
+                if p and p ~= root and p._kind ~= "StatusBar" and (p.w or 0) > 0 and (p.h or 0) > 0 then
                     local pr = rectOf(p, root, cache)
-                    if r.l < pr.l - slack or r.r > pr.r + slack or r.t > pr.t + slack or r.b < pr.b - slack then
-                        table.insert(problems, label(o) .. " spills out of its card")
+                    local inset = 3 -- the card's border
+                    if r.l < pr.l + inset - 1 or r.r > pr.r - inset + slack or r.t > pr.t - inset + 1 or r.b < pr.b + inset then
+                        table.insert(problems, label(o) .. " touches or spills out of its card's edge")
                     end
                 end
             end

@@ -133,6 +133,8 @@ local function GetQuestTitle(questID)
             return title
         end
     end
+    local rec = QuestPaceLogDB.quests and QuestPaceLogDB.quests[questID]
+    if rec and rec.title then return rec.title end -- the name kept when it was accepted
     return "Unknown quest (" .. tostring(questID) .. ")"
 end
 
@@ -658,6 +660,10 @@ local function MinSec(sec)
     return string.format("%d:%02d", math.floor(sec / 60), sec % 60)
 end
 
+-- How long a finished quest took. Accept to turn-in when both happened in one
+-- session, else its clock (activeSec), the time played with it tracked.
+local function QuestTime(e) return e.durationSec or e.activeSec end
+
 -- "1 quest", "2 quests".
 local function Plural(n, one, many) return n .. " " .. (n == 1 and one or (many or one .. "s")) end
 
@@ -710,6 +716,10 @@ local function SessionEndAfter(t)
     return t
 end
 
+-- When an open quest's clock starts. Accepted, or for a quest that was
+-- already in the log when the addon first saw it, first seen.
+local function StartedAt(rec) return rec.acceptedAt or rec.firstSeenAt end
+
 -- Brings every open quest's clock in line with whether you track it right
 -- now. Quests accepted before 2.4 start from an estimate, the time you
 -- played since accepting them, since when you untracked them wasn't kept.
@@ -717,13 +727,13 @@ local function SyncQuestClocks()
     if not session then return end
     local now = time()
     for id, rec in pairs(QuestTracker()) do
-        if rec.acceptedAt and not rec.turnedInAt then
+        if StartedAt(rec) and not rec.turnedInAt then
             local on = IsOnQuest(id)
             if on == false or (on == nil and rec.droppedAt) then
                 ClockPause(rec, now)
             else
                 if rec.activeSec == nil then
-                    rec.activeSec, rec.activeEstimated, rec.activeSince = PlayedSince(rec.acceptedAt), true, nil
+                    rec.activeSec, rec.activeEstimated, rec.activeSince = PlayedSince(StartedAt(rec)), true, nil
                 end
                 if rec.activeSince and rec.activeSince < session.startedAt then
                     ClockPause(rec, math.max(rec.activeSince, SessionEndAfter(rec.activeSince)))
@@ -931,8 +941,9 @@ local function SessionTurnIns(s)
 end
 
 local function CheckRecords(entry)
-    if entry and entry.durationSec and entry.durationSec >= 60 and (entry.xpReward or 0) > 0 then
-        local rate = entry.xpReward / (entry.durationSec / 60)
+    local took = entry and QuestTime(entry)
+    if took and took >= 60 and (entry.xpReward or 0) > 0 then
+        local rate = entry.xpReward / (took / 60)
         TryRecord("questXPPerMin", math.floor(rate + 0.5), string.format("%d on %s", math.floor(rate + 0.5), entry.title or "?"))
     end
     local n = SessionTurnIns(session)
@@ -1193,8 +1204,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
         end
         CheckRecords(entry)
         local suffix = ""
-        if entry.durationSec then
-            suffix = string.format(" (took %d:%02d)", math.floor(entry.durationSec / 60), entry.durationSec % 60)
+        if QuestTime(entry) then
+            suffix = string.format(" (took %s%s)", (entry.durationSec or not entry.activeEstimated) and "" or "~", MinSec(QuestTime(entry)))
         end
         local xpNote = (xpReward and xpReward > 0) and string.format(", %d xp", xpReward) or ""
         local levelNote
@@ -1454,7 +1465,7 @@ local function ReportLines(s, allTime)
     for _, e in ipairs(s.entries) do
         if e.backlog then
             backlogCount = backlogCount + 1
-        elseif e.durationSec then
+        elseif QuestTime(e) then
             table.insert(closed, e)
         end
     end
@@ -1464,21 +1475,21 @@ local function ReportLines(s, allTime)
     else
         add(string.format("|cff33ff99[Almanac] Report|r, session started %s", s.startedAtStr))
     end
-    add(string.format("Quests logged, %d. Quests with both a start and end time, %d%s.", #s.entries, #closed,
+    add(string.format("Quests logged, %d. Timed quests, %d%s.", #s.entries, #closed,
         backlogCount > 0 and string.format(" (%d more marked backlog, not counted here)", backlogCount) or ""))
 
     if #closed > 0 then
         local total, longest, shortest = 0, closed[1], closed[1]
         for _, e in ipairs(closed) do
-            total = total + e.durationSec
-            if e.durationSec > longest.durationSec then longest = e end
-            if e.durationSec < shortest.durationSec then shortest = e end
+            total = total + QuestTime(e)
+            if QuestTime(e) > QuestTime(longest) then longest = e end
+            if QuestTime(e) < QuestTime(shortest) then shortest = e end
         end
         local avg = total / #closed
         add(string.format("Average time per quest, %d:%02d.", math.floor(avg / 60), avg % 60))
         add(string.format("Longest, \"%s\" at %d:%02d. Shortest, \"%s\" at %d:%02d.",
-            longest.title, math.floor(longest.durationSec / 60), longest.durationSec % 60,
-            shortest.title, math.floor(shortest.durationSec / 60), shortest.durationSec % 60))
+            longest.title, math.floor(QuestTime(longest) / 60), QuestTime(longest) % 60,
+            shortest.title, math.floor(QuestTime(shortest) / 60), QuestTime(shortest) % 60))
     end
 
     -- Gap between one quest's turn-in and the next quest's accept, a rough proxy
@@ -1617,7 +1628,8 @@ local function ReportLines(s, allTime)
         add(string.format("Deaths %s, %d, %s spent dead.", scope, #s.deaths, MinSec(down)))
     end
     if (s.moneyGained or 0) > 0 or (s.moneySpent or 0) > 0 then
-        add(string.format("Gold %s, %s earned, %s of it from quest rewards, %s spent.", scope, Gold(s.moneyGained), Gold(s.moneyFromQuests), Gold(s.moneySpent)))
+        add(string.format("Gold %s, %s earned%s, %s spent.", scope, Gold(s.moneyGained or 0),
+            (s.moneyFromQuests or 0) > 0 and (", " .. Gold(s.moneyFromQuests) .. " of it from quest rewards") or "", Gold(s.moneySpent or 0)))
     end
     if #(s.discoveries or {}) > 0 or #(s.flightPaths or {}) > 0 then
         local dxp = 0
@@ -1670,8 +1682,8 @@ local function DashboardStats(s)
         if e.turnedInGroupSize then
             if e.turnedInGroupSize > 1 then st.grouped = st.grouped + 1 else st.solo = st.solo + 1 end
         end
-        if e.durationSec and not e.backlog then
-            st.closedCount, st.closedTotal = st.closedCount + 1, st.closedTotal + e.durationSec
+        if QuestTime(e) and not e.backlog then
+            st.closedCount, st.closedTotal = st.closedCount + 1, st.closedTotal + QuestTime(e)
             table.insert(st.recent, e)
         end
     end
@@ -1786,14 +1798,14 @@ local function LensData(lens, s, st, allTime)
         local g, goal = GoalPace(), QuestPaceLogDB.goal
         local best = Records().questXPPerMin
         tile(st.xpPerMin and tostring(math.floor(st.xpPerMin + 0.5)) or "none yet", "XP per minute played")
-        tile(st.done > 0 and string.format("%.1f", st.done / hours) or "none yet", "quests turned in an hour")
+        tile(st.done > 0 and string.format("%.1f", st.done / hours) or "none yet", "quests an hour")
         if allTime then
             tile(tostring(UnitLevel("player")), "your level")
         else
             tile(eta and MinSec(eta) or "none yet", eta and ("to level " .. (UnitLevel("player") + 1)) or "to the next level")
         end
-        tile(goal and (g and g.done and "done" or string.format("%d to go", g and g.left or 0)) or "not set", goal and ("levels to " .. goal.level .. (goal.byStr and (" by " .. goal.byStr) or "")) or "goal, set with /qpl goal 20")
-        tile(best and tostring(best.value) or "none yet", "best XP a minute on a quest")
+        tile(goal and (g and g.done and "done" or string.format("%d to go", g and g.left or 0)) or "not set", goal and ("levels to " .. goal.level) or "level goal")
+        tile(best and tostring(best.value) or "none yet", "best XP a minute")
         d.title = "Each level against the one before"
         local hist = LevelHistory()
         for i = 1, #hist do
@@ -1823,7 +1835,7 @@ local function LensData(lens, s, st, allTime)
         tile(Thousands(dxp), "XP from discovering")
         tile(tostring(#(s.flightPaths or {})), "flight paths learned")
         tile(tostring(places), "places visited")
-        tile(tostring(zoneCount), "zones you turned quests in")
+        tile(tostring(zoneCount), "zones with turn-ins")
         d.title = "Quests that sent you farthest"
         local list = {}
         for _, rec in pairs(QuestTracker()) do
@@ -1842,7 +1854,7 @@ local function LensData(lens, s, st, allTime)
         for _, g in ipairs(s.groups or {}) do if g.durationSec then closed, total = closed + 1, total + g.durationSec end end
         local groupQuests = 0
         for _, e in ipairs(s.entries) do if e.suggestedGroup and e.turnedInAt then groupQuests = groupQuests + 1 end end
-        tile(pct(groupedSec, st.playedSec or 0), "of your time in a group")
+        tile(pct(groupedSec, st.playedSec or 0), "of time in a group")
         tile(tostring(#(s.groups or {})), "groups joined")
         tile(closed > 0 and MinSec(total / closed) or "none yet", "average time together")
         tile(pct(st.grouped, st.grouped + st.solo), "of turn-ins in a group")
@@ -2292,14 +2304,14 @@ UI.TIPS = {
     ["XP per minute played"] = "Experience per minute of play, in sessions that recorded experience. Time away from the keyboard lowers it.",
     ["Time played"] = "From logging in to the last thing the addon recorded, added up over the sessions shown.",
     ["Resting"] = "Time spent resting in inns, cities and at campfires.",
-    ["Quests turned in an hour"] = "Quests turned in per hour of play.",
-    ["Best XP a minute on a quest"] = "Your record, the most experience a minute one quest has paid, for quests of a minute or more.",
+    ["Quests an hour"] = "Quests turned in per hour of play.",
+    ["Best XP a minute"] = "Your record, the most experience a minute one quest has paid, for quests of a minute or more.",
     ["Places discovered"] = "New places the game announced with its own Discovered message.",
     ["XP from discovering"] = "Experience the game paid for those discoveries.",
     ["Flight paths learned"] = "Flight paths you learned.",
     ["Places visited"] = "Every zone and subzone you stood in, counted the first time the addon saw you there.",
-    ["Zones you turned quests in"] = "How many different zones you turned quests in.",
-    ["Of your time in a group"] = "The share of your play spent in a group. Only how many people are counted, never who.",
+    ["Zones with turn-ins"] = "How many different zones you turned quests in.",
+    ["Of time in a group"] = "The share of your play spent in a group. Only how many people are counted, never who.",
     ["Groups joined"] = "Groups you joined.",
     ["Average time together"] = "How long your groups lasted, on average.",
     ["Of turn-ins in a group"] = "The share of quests you turned in while grouped.",
@@ -2316,7 +2328,10 @@ UI.TIPS = {
 function UI.TipFor(label)
     if UI.TIPS[label] then return UI.TIPS[label] end
     if label:find("^To ") then return "Time to the next level at this session's pace." end
-    if label:find("^Levels to") or label:find("goal") then return "Your level goal. /qpl goal 20 sets one, with an optional date." end
+    if label:find("^Levels to") or label:find("goal") then
+        local by = QuestPaceLogDB.goal and QuestPaceLogDB.goal.byStr
+        return "Your level goal" .. (by and (", by " .. by) or "") .. ". /qpl goal 20 sets one, with an optional date like /qpl goal 20 2026-12-01."
+    end
     if UI.TYPES[label:lower()] then return "How strongly your play leans " .. label .. ", from 0 to 100%." end
     return nil
 end
@@ -2511,7 +2526,7 @@ local function BuildWindow()
             if from and to and from ~= to then GameTooltip:AddLine("From " .. from .. " to " .. to, 1, 1, 1)
             elseif from or to then GameTooltip:AddLine("In " .. (from or to), 1, 1, 1) end
             local xp = (e.xpReward and e.xpReward > 0) and e.xpReward or nil
-            GameTooltip:AddLine(Clock(e.durationSec) .. (xp and string.format(", %s XP, %s XP a minute", Thousands(xp), Thousands(xp / math.max(1, e.durationSec / 60))) or ""), 1, 1, 1)
+            GameTooltip:AddLine(Clock(QuestTime(e)) .. (xp and string.format(", %s XP, %s XP a minute", Thousands(xp), Thousands(xp / math.max(1, QuestTime(e) / 60))) or ""), 1, 1, 1)
             if (e.turnedInGroupSize or 1) > 1 then GameTooltip:AddLine(string.format("In a group of %d", e.turnedInGroupSize), 1, 1, 1) end
             GameTooltip:Show()
         end)
@@ -2648,7 +2663,7 @@ local function BuildWindow()
         end
 
         local longest = 1
-        for _, e in ipairs(st.recent) do if e.durationSec > longest then longest = e.durationSec end end
+        for _, e in ipairs(st.recent) do if QuestTime(e) > longest then longest = QuestTime(e) end end
         if #st.recent == 0 then recentEmpty:Show() else recentEmpty:Hide() end
         for i, row in ipairs(rows) do
             local e = st.recent[i]
@@ -2657,9 +2672,10 @@ local function BuildWindow()
                 for _, q in ipairs(QUEST_COLORS) do if q[1] == e.colorAtTurnIn then color = { q[2], q[3], q[4] } end end
                 row.name:SetText(e.title or "?")
                 row.bar:SetStatusBarColor(color[1], color[2], color[3], 1)
-                row.bar:SetValue(e.durationSec / longest)
-                row.time:SetText(Clock(e.durationSec))
-                row.rate:SetText((e.xpReward and e.xpReward > 0 and e.durationSec >= 60) and Thousands(e.xpReward / (e.durationSec / 60)) or "")
+                local took = QuestTime(e)
+                row.bar:SetValue(took / longest)
+                row.time:SetText((not e.durationSec and e.activeEstimated and "~" or "") .. Clock(took))
+                row.rate:SetText((e.xpReward and e.xpReward > 0 and took >= 60) and Thousands(e.xpReward / (took / 60)) or "")
                 row.e = e
                 row.name:Show(); row.bar:Show(); row.time:Show(); row.rate:Show(); row.hit:Show()
             else
@@ -3035,7 +3051,7 @@ local function HUDQuests()
     for id in pairs(inLog) do
         total = total + 1
         local rec = tracker[id]
-        if rec and rec.acceptedAt and not rec.turnedInAt and IsTracked(id) then table.insert(timed, { title = rec.title or inLog[id].title, at = rec.acceptedAt, rec = rec }) end
+        if rec and StartedAt(rec) and not rec.turnedInAt and IsTracked(id) then table.insert(timed, { title = rec.title or inLog[id].title, at = StartedAt(rec), rec = rec }) end
     end
     table.sort(timed, function(a, b) return a.at > b.at end)
     return timed, total
@@ -3445,9 +3461,9 @@ function UI.OpenQuestTimes()
     local byID, byTitle = {}, {}
     for id, rec in pairs(QuestTracker()) do
         local on = IsOnQuest(id)
-        if rec.acceptedAt and not rec.turnedInAt and (on or (on == nil and not rec.droppedAt)) and IsTracked(id) then
+        if StartedAt(rec) and not rec.turnedInAt and (on or (on == nil and not rec.droppedAt)) and IsTracked(id) then
             byID[id] = rec
-            if rec.title and (not byTitle[rec.title] or rec.acceptedAt > byTitle[rec.title].acceptedAt) then byTitle[rec.title] = rec end
+            if rec.title and (not byTitle[rec.title] or StartedAt(rec) > StartedAt(byTitle[rec.title])) then byTitle[rec.title] = rec end
         end
     end
     return byID, byTitle

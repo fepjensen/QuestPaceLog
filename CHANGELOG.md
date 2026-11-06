@@ -14,6 +14,10 @@ A new design, made to look and read like part of the game.
 - **Quest timers** in the game's objective tracker come back within a second when the game rebuilds it.
 - **`/almanac` or `/qpl` on its own opens the dashboard.** `/qpl log` prints this session's quests in chat, which the bare command used to do.
 - **Discoveries record their XP on the launch client.** It shows `Discovered: Brill` on screen without the XP and puts the XP line in the experience chat, so the addon now reads both and joins them into one discovery.
+- **Quests carried over from an earlier session count.** A quest accepted in one session and turned in during the next was left out of Recent quests and the averages. It now counts with its quest clock, the time you played with it tracked. The report's "Quests with both a start and end time" line is now "Timed quests".
+- **A quest already in your log when the addon first saw it gets a timer,** counted from then and marked ~, in the tracker, the objective tracker and the map's quest log.
+- A turn-in keeps the quest's name the addon saved at accept, if the game no longer knows it.
+- Shorter tile labels, so none wraps into the tile's edge, found from launch screenshots. The goal's date moved into its hover tip. The report only mentions gold from quests when there was some.
 - Window text speaks to players, no version numbers or commands where a sentence does.
 - `docs/DESIGN.md` sets the grid, type, colors, components and a review checklist. The tests now measure every window, tab and state and fail on text that overflows, overlaps or leaves its card or window.
 - New saved settings, `windowPos`, `windowScale`, `hudScale`, `hudLocked`, `minimapAngle`, `minimapHidden` and `chat`, listed in SCHEMA.md. No play data fields changed.
